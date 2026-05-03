@@ -15,9 +15,6 @@ In Live Preview / Source mode the ID is displayed as a small monospace pill (e.g
 ### Requirements
 [Obsidian Tasks](https://github.com/obsidian-tasks-group/obsidian-tasks)
 
-### Installing the Plugin
-Currently the plugin has not been added to the Obsidian Community plugins yet, this will happen after some testing and feedback from early users
-
 #### Manual Installation
 1. Download the latest release from [GitHub Releases](https://github.com/sasoon/obsidian-gcal-sync/releases)
 2. Extract the zip file into your Obsidian vault's `.obsidian/plugins/` directory
