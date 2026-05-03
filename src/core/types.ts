@@ -1,5 +1,4 @@
 import { TFile } from 'obsidian';
-import type { Credentials, OAuth2Client } from 'google-auth-library';
 import "obsidian";
 
 declare module "obsidian" {
@@ -108,14 +107,6 @@ export interface FileChangeEvent {
 export interface CacheChangeEvent {
     type: 'resolve' | 'change';
     file?: TFile;
-}
-
-export interface GoogleAuthManagerInterface {
-    getOAuth2Client(): OAuth2Client;
-    startAuthFlow(): Promise<void>;
-    refreshTokens(tokens: Credentials): Promise<Credentials>;
-    revokeTokens(tokens: Credentials): Promise<void>;
-    onunload(): Promise<void>;
 }
 
 // Constants for task versioning and validation

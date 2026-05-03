@@ -14,7 +14,6 @@ import { TokenController } from '../tasks/TokenController';
 import { LogUtils } from '../utils/logUtils';
 import { hasTaskChanged } from '../utils/taskUtils';
 import { initializeStore } from './store';
-import { Platform } from 'obsidian';
 
 export default class GoogleCalendarSyncPlugin extends Plugin {
     settings: GoogleCalendarSettings;
@@ -138,44 +137,17 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                 }
             }
 
-            // Check if tokens are actually valid by proper verification
+            // Probe the stored refresh token now so we don't sit in a fake
+            // 'connected' state when Google has revoked access. Transient
+            // network errors leave state intact; only definitive revocation
+            // (400/401 from the token endpoint) clears it.
             let isAuthenticated = this.authManager.isAuthenticated();
-
-            // On mobile especially, we need to verify tokens are actually valid
-            // Defer this validation to after load completes to avoid blocking startup
-            if (isAuthenticated && Platform.isMobile) {
-                setTimeout(async () => {
-                    console.log('Performing additional token validation on mobile');
-                    try {
-                        // This will try to refresh if needed
-                        await this.authManager?.getValidAccessToken();
-                        LogUtils.debug('Mobile token validation successful');
-                    } catch (e) {
-                        console.error('Token validation failed on mobile, clearing auth state:', e);
-
-                        // Provide more specific logging based on error type
-                        if (e instanceof Error) {
-                            if (e.message.includes('expired')) {
-                                LogUtils.error('Token expired and refresh failed');
-                            } else if (e.message.includes('network')) {
-                                LogUtils.error('Network error during token validation');
-                            } else {
-                                LogUtils.error(`Token validation error: ${e.message}`);
-                            }
-                        }
-
-                        // Update authentication state
-                        useStore.getState().setAuthenticated(false);
-                        useStore.getState().setStatus('disconnected');
-                        if (this.settings.oauth2Tokens) {
-                            this.settings.oauth2Tokens = undefined;
-                            await this.saveSettings();
-                        }
-
-                        // Notify user about authentication issue
-                        new Notice('Authentication issue detected. Please reconnect to Google Calendar.', 8000);
-                    }
-                }, 100);
+            if (isAuthenticated) {
+                const result = await this.authManager.validateOnLoad();
+                if (result === 'revoked') {
+                    isAuthenticated = false;
+                    new Notice('Google Calendar access has been revoked. Please reconnect.', 8000);
+                }
             }
 
             // Initialize metadata manager

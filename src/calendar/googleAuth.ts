@@ -258,46 +258,26 @@ export class GoogleAuthManager {
 
             let response: any;
 
-            if (this.clientSecret) {
-                console.log('🔄 Exchanging with PKCE locally (custom client)');
-                response = await requestUrl({
-                    url: GOOGLE_TOKEN_ENDPOINT,
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: new URLSearchParams({
-                        code: code,
-                        client_id: this.clientId,
-                        client_secret: this.clientSecret,
-                        redirect_uri: this.redirectUri,
-                        grant_type: 'authorization_code',
-                        code_verifier: this.codeVerifier,
-                    }).toString()
-                });
-
-            } else {
-                console.log('IMPORTANT - For mobile auth, make sure this redirect URI exactly matches what is registered in Google Cloud Console');
-
-                const requestBody = {
-                    operation: 'exchange_code_pkce',
-                    code: code,
-                    code_verifier: this.codeVerifier,
-                    redirect_uri: this.redirectUri,
-                    client_id: this.clientId
-                };
-
-                console.log('Token exchange request: operation=exchange_code_pkce, code=[REDACTED], code_verifier=[REDACTED]');
-
-                response = await requestUrl({
-                    url: 'https://obsidian-gcal-sync-netlify-oauth.netlify.app/.netlify/functions/token-exchange',
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(requestBody)
-                });
+            if (!this.clientSecret) {
+                throw new Error('Client Secret is required. Please configure it in plugin settings.');
             }
+
+            console.log('🔄 Exchanging auth code with PKCE');
+            response = await requestUrl({
+                url: GOOGLE_TOKEN_ENDPOINT,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    code: code,
+                    client_id: this.clientId,
+                    client_secret: this.clientSecret,
+                    redirect_uri: this.redirectUri,
+                    grant_type: 'authorization_code',
+                    code_verifier: this.codeVerifier,
+                }).toString()
+            });
 
             console.log('Token exchange response status:', response.status);
 
@@ -527,40 +507,26 @@ export class GoogleAuthManager {
 
     private async exchangeCodeForTokens(code: string): Promise<OAuth2Tokens> {
         try {
-            var response;
-            if (this.clientSecret) {
-                console.log('🔄 Exchanging auth code for tokens locally');
-                response = await requestUrl({
-                    url: GOOGLE_TOKEN_ENDPOINT,
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: new URLSearchParams({
-                        code: code,
-                        client_id: this.clientId,
-                        client_secret: this.clientSecret,
-                        redirect_uri: this.redirectUri,
-                        grant_type: 'authorization_code',
-                    }).toString()
-                });
-                console.log('🔄 Google Oauth response status:', response.status);
-            } else {
-                console.log('🔄 Calling Netlify function for token exchange');
-                response = await requestUrl({
-                    url: 'https://obsidian-gcal-sync-netlify-oauth.netlify.app/.netlify/functions/token-exchange',
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        operation: 'exchange_code',
-                        code: code,
-                        platform: 'desktop'
-                    })
-                });
-                console.log('🔄 Netlify response status:', response.status);
+            if (!this.clientSecret) {
+                throw new Error('Client Secret is required. Please configure it in plugin settings.');
             }
+
+            console.log('🔄 Exchanging auth code for tokens');
+            const response = await requestUrl({
+                url: GOOGLE_TOKEN_ENDPOINT,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    code: code,
+                    client_id: this.clientId,
+                    client_secret: this.clientSecret,
+                    redirect_uri: this.redirectUri,
+                    grant_type: 'authorization_code',
+                }).toString()
+            });
+            console.log('🔄 Google OAuth response status:', response.status);
 
             if (response.status >= 400) {
                 console.error('❌ Error response from token exchange:', response.status, LogUtils.sanitize(response.text));
@@ -591,38 +557,25 @@ export class GoogleAuthManager {
         }
 
         try {
-            var response
-            if (this.clientSecret) {
-                console.log('🔄 Refreshing access token locally...');
-                response = await requestUrl({
-                    url: GOOGLE_TOKEN_ENDPOINT,
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: new URLSearchParams({
-                        refresh_token: this.refreshToken,
-                        client_id: this.clientId,
-                        client_secret: this.clientSecret,
-                        grant_type: 'refresh_token',
-                    }).toString()
-                });
-                console.log('🔄 Google Oauth response status:', response.status);
-            } else {
-                console.log('🔄 Refreshing access token via Netlify function...');
-                response = await requestUrl({
-                    url: 'https://obsidian-gcal-sync-netlify-oauth.netlify.app/.netlify/functions/token-exchange',
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        operation: 'refresh_token',
-                        refresh_token: this.refreshToken
-                    })
-                });
-                console.log('🔄 Netlify response status:', response.status);
+            if (!this.clientSecret) {
+                throw new Error('Client Secret is required. Please configure it in plugin settings.');
             }
+
+            console.log('🔄 Refreshing access token');
+            const response = await requestUrl({
+                url: GOOGLE_TOKEN_ENDPOINT,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    refresh_token: this.refreshToken,
+                    client_id: this.clientId,
+                    client_secret: this.clientSecret,
+                    grant_type: 'refresh_token',
+                }).toString()
+            });
+            console.log('🔄 Google OAuth response status:', response.status);
             if (response.status >= 400) {
                 console.error('Token refresh failed with status', response.status, LogUtils.sanitize(response.text));
                 throw new Error(`Token refresh failed with status ${response.status}`);
@@ -937,6 +890,41 @@ export class GoogleAuthManager {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Probe stored tokens on plugin load. Returns 'valid' if the refresh path works
+     * (or wasn't needed because the access token is still good), 'revoked' if Google
+     * rejected the refresh token (clears stored state), and 'transient' for network
+     * errors (leaves state intact — we'll retry on the next sync).
+     */
+    async validateOnLoad(): Promise<'valid' | 'revoked' | 'transient'> {
+        try {
+            await this.getValidAccessToken();
+            return 'valid';
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            // 400/401 from the token endpoint means the refresh token itself is no
+            // longer accepted (revoked, expired idle for >6mo, scope changes, etc.).
+            // Network errors and other failures should not log the user out.
+            if (/status (400|401)/.test(message) || message.includes('No refresh token')) {
+                console.log('Refresh token rejected on load — clearing stored auth state');
+                await this.clearStoredTokens();
+                return 'revoked';
+            }
+            console.log('Token validation failed transiently, keeping stored state:', message);
+            return 'transient';
+        }
+    }
+
+    private async clearStoredTokens(): Promise<void> {
+        this.accessToken = null;
+        this.refreshToken = null;
+        this.tokenExpiry = null;
+        this.plugin.settings.oauth2Tokens = undefined;
+        this.plugin.settings.encryptedOAuth2Tokens = undefined;
+        this.plugin.settings.tokensEncrypted = false;
+        await this.plugin.saveSettings();
     }
 
     // Generate a random state value for CSRF protection
