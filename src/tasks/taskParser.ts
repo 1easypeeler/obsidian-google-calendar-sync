@@ -575,8 +575,13 @@ export class TaskParser {
         // Remove the ID with better spacing handling
         header = header.replace(/<!--\s*task-id:\s*[a-z0-9]+\s*-->/, '').trim();
 
-        // Remove hashtags/tags (including those with numbers like #1a1a1a)
-        header = header.replace(/#[a-zA-Z0-9_]+/g, '').trim();
+        // Remove hashtags/tags. Obsidian tags allow letters, digits, underscores,
+        // hyphens, and forward slashes (for nested tags like #project/foo-bar).
+        header = header.replace(/#[a-zA-Z0-9_/-]+/g, '').trim();
+
+        // Unwrap wikilinks: [[Page]] → Page, [[Page|Alias]] → Alias
+        header = header.replace(/\[\[([^\[\]|]+)\|([^\[\]]+)\]\]/g, '$2').trim();
+        header = header.replace(/\[\[([^\[\]]+)\]\]/g, '$1').trim();
 
         // Remove Obsidian Tasks plugin emojis and their associated values
         // Start date: 🛫 YYYY-MM-DD  

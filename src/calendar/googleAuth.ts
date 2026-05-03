@@ -922,23 +922,18 @@ export class GoogleAuthManager {
     }
 
     isAuthenticated(): boolean {
-        // First check memory
-        if (this.accessToken && this.refreshToken) {
-            // If we have tokens but they're expired, consider not authenticated
-            if (this.tokenExpiry && Date.now() >= this.tokenExpiry) {
-                console.log('🔐 Tokens exist but are expired, considering not authenticated');
-                return false;
-            }
+        // A valid refresh token means the user is authenticated — an expired
+        // access token is normal and gets refreshed lazily via getValidAccessToken().
+        // Treating expired-access as logged-out caused spurious re-auth prompts
+        // after the laptop slept for >1h (Google access tokens expire in ~1h).
+        if (this.refreshToken) {
             return true;
         }
-        // Then check settings
-        const tokens = this.plugin.settings.oauth2Tokens;
-        if (tokens?.access_token && tokens?.refresh_token) {
-            // If tokens exist but are expired, consider not authenticated
-            if (tokens.expiry_date && Date.now() >= tokens.expiry_date) {
-                console.log('🔐 Saved tokens exist but are expired, considering not authenticated');
-                return false;
-            }
+        // Memory not populated yet (e.g. settings just loaded) — fall back to stored tokens.
+        if (this.plugin.settings.oauth2Tokens?.refresh_token) {
+            return true;
+        }
+        if (this.plugin.settings.tokensEncrypted && this.plugin.settings.encryptedOAuth2Tokens) {
             return true;
         }
         return false;
