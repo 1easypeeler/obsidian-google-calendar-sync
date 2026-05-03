@@ -866,19 +866,12 @@ export class GoogleAuthManager {
     isAuthenticated(): boolean {
         // A valid refresh token means the user is authenticated — an expired
         // access token is normal and gets refreshed lazily via getValidAccessToken().
-        // Treating expired-access as logged-out caused spurious re-auth prompts
-        // after the laptop slept for >1h (Google access tokens expire in ~1h).
-        if (this.refreshToken) {
-            return true;
-        }
-        // Memory not populated yet (e.g. settings just loaded) — fall back to stored tokens.
-        if (this.plugin.settings.oauth2Tokens?.refresh_token) {
-            return true;
-        }
-        if (this.plugin.settings.tokensEncrypted && this.plugin.settings.encryptedOAuth2Tokens) {
-            return true;
-        }
-        return false;
+        // We deliberately only trust in-memory state here: by the time any
+        // caller checks, loadSavedTokens() has already run in onload and either
+        // populated this.refreshToken or cleared a corrupt blob. Trusting an
+        // encrypted-blob-on-disk without proving it can decrypt was the M1
+        // hazard from the audit (logged in 'connected' but every call failed).
+        return !!this.refreshToken;
     }
 
     /**

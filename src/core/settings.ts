@@ -4,6 +4,15 @@ import { GoogleCalendarSettings } from './types';
 import { useStore } from './store';
 import { Notice } from 'obsidian';
 
+// "primary" or an email-shaped ID (user calendars: you@gmail.com,
+// secondary calendars: <hash>@group.calendar.google.com, holiday calendars:
+// en.uk#holiday@group.v.calendar.google.com). The character class allows
+// the few non-alphanumerics Google emits in calendar IDs (`._%+-#`).
+function isValidCalendarId(id: string): boolean {
+    if (id === 'primary') return true;
+    return /^[A-Za-z0-9._%+\-#]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test(id);
+}
+
 export const DEFAULT_SETTINGS: GoogleCalendarSettings = {
     clientId: '',
     clientSecret: '',
@@ -72,14 +81,30 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName('Calendar ID')
             .setDesc('Google Calendar to sync tasks with. Use "primary" for your default calendar, or paste a calendar ID from Google Calendar > calendar settings > "Integrate calendar" (e.g. you@gmail.com or abc123@group.calendar.google.com). Events already synced to a different calendar are not migrated.')
-            .addText(text => text
-                .setPlaceholder('primary')
-                .setValue(this.plugin.settings.calendarId || 'primary')
-                .onChange(async (value) => {
-                    const trimmed = value.trim();
-                    this.plugin.settings.calendarId = trimmed.length > 0 ? trimmed : 'primary';
+            .addText(text => {
+                // Buffer typing in onChange; validate and save on blur so users
+                // don't get a Notice on every keystroke while mid-typing.
+                let pending = this.plugin.settings.calendarId || 'primary';
+                text.setPlaceholder('primary')
+                    .setValue(pending)
+                    .onChange(value => { pending = value.trim(); });
+
+                text.inputEl.addEventListener('blur', async () => {
+                    if (pending.length === 0) {
+                        this.plugin.settings.calendarId = 'primary';
+                        text.setValue('primary');
+                        await this.plugin.saveSettings();
+                        return;
+                    }
+                    if (!isValidCalendarId(pending)) {
+                        new Notice('Invalid Calendar ID — expected "primary" or an email-shaped ID.');
+                        text.setValue(this.plugin.settings.calendarId || 'primary');
+                        return;
+                    }
+                    this.plugin.settings.calendarId = pending;
                     await this.plugin.saveSettings();
-                }));
+                });
+            });
 
         new Setting(containerEl)
             .setName('Default Reminder')

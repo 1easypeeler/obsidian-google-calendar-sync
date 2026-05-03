@@ -66,15 +66,20 @@ export class TokenController {
             }, 1000))
         )
 
-        // Handle copy/paste to prevent ID duplication
+        // Handle copy/paste to prevent ID duplication. We mutate the inserted
+        // text (via preventDefault + editor.replaceSelection), NOT the user's
+        // clipboard — earlier code called clipboardData.setData() which left
+        // the modified content on the clipboard for the user's next paste.
         this.plugin.registerEvent(
             this.plugin.app.workspace.on('editor-paste', (evt: ClipboardEvent, editor: Editor) => {
                 const content = evt.clipboardData?.getData('text')
                 if (!content) return
 
-                // Remove any existing task IDs from pasted content
-                const newContent = content.replace(this.ID_PATTERN, '')
-                evt.clipboardData?.setData('text', newContent)
+                const cleaned = content.replace(this.ID_PATTERN, '')
+                if (cleaned === content) return // Nothing to strip — let default paste run
+
+                evt.preventDefault()
+                editor.replaceSelection(cleaned)
                 LogUtils.debug('Stripped task IDs from pasted content')
             })
         )

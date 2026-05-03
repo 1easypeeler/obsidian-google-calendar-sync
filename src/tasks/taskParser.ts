@@ -436,16 +436,24 @@ export class TaskParser {
 
             for (const file of batch) {
                 try {
+                    // vault.process may retry its callback if the file changes
+                    // between read and write. Each retry generates fresh IDs, so
+                    // we accumulate metadata into a local map that's reset on
+                    // every callback invocation, and only commit it to settings
+                    // after vault.process resolves successfully.
+                    let pendingMetadata: Record<string, TaskMetadata> = {};
                     let addedInFile = 0;
 
                     await this.plugin.app.vault.process(file, (content) => {
+                        pendingMetadata = {};
+                        addedInFile = 0;
+
                         const lines = content.split('\n');
                         let modified = false;
 
                         for (let j = 0; j < lines.length; j++) {
                             const line = lines[j];
 
-                            // Skip indented continuation lines — they belong to a parent task
                             if (indentedPattern.test(line)) continue;
                             if (!taskLinePattern.test(line)) continue;
                             if (idPattern.test(line)) continue;
@@ -456,11 +464,9 @@ export class TaskParser {
                             const trimmedRight = line.replace(/\s+$/, '');
                             lines[j] = `${trimmedRight} <!-- task-id: ${newId} -->`;
 
-                            // Pre-populate metadata so the freshly-tagged task is
-                            // associated with this file when the sync queue runs.
                             const dateMatch = line.match(datePattern);
                             const now = Date.now();
-                            this.plugin.settings.taskMetadata[newId] = {
+                            pendingMetadata[newId] = {
                                 filePath: file.path,
                                 eventId: '',
                                 title: line.replace(/^\s*- \[[ xX]\] /, '').trim(),
@@ -479,6 +485,7 @@ export class TaskParser {
                     });
 
                     if (addedInFile > 0) {
+                        Object.assign(this.plugin.settings.taskMetadata, pendingMetadata);
                         filesTouched++;
                         idsAdded += addedInFile;
                         LogUtils.debug(`Backfilled ${addedInFile} task ID(s) in ${file.path}`);
@@ -604,6 +611,15 @@ export class TaskParser {
 
         // Clean up any double spaces that might have been created
         header = header.replace(/\s{2,}/g, ' ').trim();
+
+        // Google Calendar caps event summaries at 1024 chars. Truncate
+        // codepoint-safely (Array.from handles surrogate pairs) at 1000 to
+        // leave a margin and avoid 400s on long task lines.
+        const SUMMARY_MAX = 1000;
+        const codepoints = Array.from(header);
+        if (codepoints.length > SUMMARY_MAX) {
+            header = codepoints.slice(0, SUMMARY_MAX - 1).join('') + '…';
+        }
 
         // If there are additional lines, append them
         if (lines.length > 1) {
