@@ -176,28 +176,77 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
         noteP.createEl('strong', { text: 'Note:' });
         noteP.appendText(' After changing credentials, disconnect your Google account and restart Obsidian (or disable and re-enable the plugin) before reconnecting.');
 
+        // Buffered credential inputs — values stay in DOM only and are
+        // persisted to disk in a single saveSettings() call when the user
+        // clicks "Save credentials". This prevents partially-typed secrets
+        // from being snapshotted into Obsidian Sync / iCloud backup history.
+        let pendingClientId = this.plugin.settings.clientId || '';
+        let pendingClientSecret = ''; // Always blank initially; empty = keep existing
+
         new Setting(containerEl)
             .setName('Client ID')
             .setDesc('Your Google OAuth Client ID')
             .addText(text => text
                 .setPlaceholder('xxxxxx.apps.googleusercontent.com')
-                .setValue(this.plugin.settings.clientId || '')
-                .onChange(async (value) => {
-                    this.plugin.settings.clientId = value.trim();
-                    await this.plugin.saveSettings();
-                }));
+                .setValue(pendingClientId)
+                .onChange(value => { pendingClientId = value.trim(); }));
 
+        const hasSavedSecret = this.plugin.authManager?.hasClientSecret() ?? false;
         new Setting(containerEl)
             .setName('Client Secret')
-            .setDesc('Your Google OAuth Client Secret')
+            .setDesc(hasSavedSecret
+                ? 'A Client Secret is saved. Leave blank to keep the existing value.'
+                : 'Your Google OAuth Client Secret. Stored encrypted via the OS keychain on desktop.')
             .addText(text => {
-                text.setPlaceholder('GOCSPX-xxxxxx')
-                    .setValue(this.plugin.settings.clientSecret || '')
-                    .onChange(async (value) => {
-                        this.plugin.settings.clientSecret = value.trim();
-                        await this.plugin.saveSettings();
-                    });
+                text.setPlaceholder(hasSavedSecret ? '••••••••••••' : 'GOCSPX-xxxxxx')
+                    .setValue('')
+                    .onChange(value => { pendingClientSecret = value; });
                 text.inputEl.type = 'password';
+                text.inputEl.autocomplete = 'off';
             });
+
+        new Setting(containerEl)
+            .setName('Save credentials')
+            .setDesc('Persist the Client ID and Client Secret. The Client Secret is encrypted before being written to disk.')
+            .addButton(btn => btn
+                .setButtonText('Save credentials')
+                .setCta()
+                .onClick(async () => {
+                    if (!this.plugin.authManager) {
+                        new Notice('Auth manager not ready yet — try again in a moment.');
+                        return;
+                    }
+                    try {
+                        this.plugin.settings.clientId = pendingClientId;
+                        await this.plugin.saveSettings();
+                        this.plugin.authManager.refreshClientId();
+
+                        if (pendingClientSecret) {
+                            await this.plugin.authManager.setClientSecret(pendingClientSecret);
+                            pendingClientSecret = '';
+                        }
+
+                        new Notice('Credentials saved.');
+                        this.display(); // Re-render to update the "saved" indicator
+                    } catch (e) {
+                        console.error('Failed to save credentials:', e);
+                        new Notice('Failed to save credentials. Check the developer console.');
+                    }
+                }));
+
+        if (hasSavedSecret) {
+            new Setting(containerEl)
+                .setName('Clear saved Client Secret')
+                .setDesc('Remove the encrypted Client Secret from this device. You will need to re-enter it to sync.')
+                .addButton(btn => btn
+                    .setButtonText('Clear')
+                    .setWarning()
+                    .onClick(async () => {
+                        if (!this.plugin.authManager) return;
+                        await this.plugin.authManager.clearClientSecret();
+                        new Notice('Client Secret cleared.');
+                        this.display();
+                    }));
+        }
     }
 }

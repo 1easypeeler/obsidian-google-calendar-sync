@@ -37,13 +37,11 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             // Load settings first
             await this.loadSettings();
 
-            // Only set default clientId if user hasn't provided custom credentials
-            if (!this.settings.clientId || !this.settings.clientSecret) {
-                const credentials = loadGoogleCredentials();
-                // Only set clientId if not already set by user
-                if (!this.settings.clientId) {
-                    this.settings.clientId = credentials.clientId;
-                }
+            // Dev convenience: if no client ID is configured in settings, fall
+            // back to the env-var path (loadGoogleCredentials reads from .env).
+            // In production this returns an empty string and is a no-op.
+            if (!this.settings.clientId) {
+                this.settings.clientId = loadGoogleCredentials().clientId;
             }
 
             // Always disable welcome modal

@@ -59,7 +59,8 @@ export interface TaskMetadata {
 
 export interface GoogleCalendarSettings {
     clientId: string;
-    clientSecret?: string;
+    clientSecret?: string; // Legacy plaintext field — migrated to encryptedClientSecret on load
+    encryptedClientSecret?: string; // Client Secret encrypted via SecureStorage
     oauth2Tokens?: OAuth2Tokens;
     encryptedOAuth2Tokens?: string; // Encrypted tokens (replaces oauth2Tokens when encrypted)
     tokensEncrypted?: boolean; // Flag indicating tokens are stored encrypted
