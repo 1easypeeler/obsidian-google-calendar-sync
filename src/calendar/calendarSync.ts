@@ -67,6 +67,18 @@ export class CalendarSync {
         this.plugin = plugin;
     }
 
+    private getCalendarId(): string {
+        const id = this.plugin.settings.calendarId?.trim();
+        return id && id.length > 0 ? id : 'primary';
+    }
+
+    private eventsPath(eventId?: string): string {
+        const calendarSegment = encodeURIComponent(this.getCalendarId());
+        return eventId
+            ? `/calendars/${calendarSegment}/events/${eventId}`
+            : `/calendars/${calendarSegment}/events`;
+    }
+
     /**
      * Clears the events cache to force fresh data on next request
      */
@@ -81,7 +93,7 @@ export class CalendarSync {
     public async initialize(): Promise<void> {
         try {
             // Verify calendar access by making a test request
-            await this.makeRequest('/calendars/primary/events', 'GET', { maxResults: 1 });
+            await this.makeRequest(this.eventsPath(), 'GET', { maxResults: 1 });
 
             // Initialize repair manager if needed
             if (!this.plugin.repairManager) {
@@ -191,7 +203,7 @@ export class CalendarSync {
         const operation = async () => {
             try {
                 await this.checkRateLimit();
-                await this.makeRequest(`/calendars/primary/events/${eventId}`, 'DELETE');
+                await this.makeRequest(this.eventsPath(eventId), 'DELETE');
                 LogUtils.debug(`Successfully deleted event: ${eventId}`);
             } catch (error) {
                 // If the event is already gone (410) or not found (404), consider it a success
@@ -235,7 +247,7 @@ export class CalendarSync {
                 }
 
                 const event = this.createEventFromTask(task);
-                await this.makeRequest(`/calendars/primary/events/${eventId}`, 'PUT', event);
+                await this.makeRequest(this.eventsPath(eventId), 'PUT', event);
                 LogUtils.debug(`Updated event ${eventId} for task ${task.id}`);
 
                 const updatedMetadata = {
@@ -392,7 +404,7 @@ export class CalendarSync {
                 if (metadata?.eventId && !task.completed) {
                     try {
                         const event = this.createEventFromTask(task);
-                        await this.makeRequest(`/calendars/primary/events/${metadata.eventId}`, 'PUT', event);
+                        await this.makeRequest(this.eventsPath(metadata.eventId), 'PUT', event);
                         this.updateTaskMetadata(task, metadata.eventId, metadata);
                         await this.saveSettings();
                         LogUtils.debug(`Updated existing event ${metadata.eventId} for task ${task.id} (via metadata fast path)`);
@@ -460,7 +472,7 @@ export class CalendarSync {
 
                     // Update the kept event
                     const event = this.createEventFromTask(task);
-                    await this.makeRequest(`/calendars/primary/events/${keepEvent.id}`, 'PUT', event);
+                    await this.makeRequest(this.eventsPath(keepEvent.id), 'PUT', event);
                     this.updateTaskMetadata(task, keepEvent.id, metadata);
                     await this.saveSettings();
                     LogUtils.debug(`Updated existing event ${keepEvent.id} for task ${task.id}`);
@@ -785,7 +797,7 @@ export class CalendarSync {
             if (timeMin) params.timeMin = timeMin;
             if (timeMax) params.timeMax = timeMax;
 
-            const response = await this.makeRequest('/calendars/primary/events', 'GET', params);
+            const response = await this.makeRequest(this.eventsPath(), 'GET', params);
             const events = response.items || [];
 
             // Update cache with detailed logging
@@ -819,13 +831,13 @@ export class CalendarSync {
                     LogUtils.debug(`Using existing event ${existingEventId} for task ${task.id}`);
                     // Update the existing event instead of creating a new one
                     const event = this.createEventFromTask(task);
-                    await this.makeRequest(`/calendars/primary/events/${existingEventId}`, 'PUT', event);
+                    await this.makeRequest(this.eventsPath(existingEventId), 'PUT', event);
                     return existingEventId;
                 }
 
                 // Create new event only if we don't have a valid existing one
                 const event = this.createEventFromTask(task);
-                const response = await this.makeRequest('/calendars/primary/events', 'POST', event);
+                const response = await this.makeRequest(this.eventsPath(), 'POST', event);
                 if (!response.id) {
                     throw new Error('Failed to create event: no event ID returned');
                 }
@@ -924,7 +936,7 @@ export class CalendarSync {
     public async listEvents(): Promise<GoogleCalendarEvent[]> {
         try {
             await this.checkRateLimit();
-            const response = await this.makeRequest('/calendars/primary/events', 'GET');
+            const response = await this.makeRequest(this.eventsPath(), 'GET');
             return response.items || [];
         } catch (error) {
             LogUtils.error('Failed to list calendar events:', error);

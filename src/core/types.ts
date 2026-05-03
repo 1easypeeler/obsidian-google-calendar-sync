@@ -66,6 +66,9 @@ export interface GoogleCalendarSettings {
     tokensEncrypted?: boolean; // Flag indicating tokens are stored encrypted
     syncEnabled: boolean;
     defaultReminder: number;
+    calendarId: string; // Google Calendar ID to sync with ('primary' for the user's default calendar, or e.g. 'abc...@group.calendar.google.com')
+    taskIdDisplay: 'show' | 'hide' | 'truncate'; // How to render <!-- task-id: ... --> comments in the editor
+    backfillIdsOnSync: boolean; // On full sync, walk all matching files and add IDs to un-IDed tasks before syncing
     includeFolders: string[];
     taskMetadata: Record<string, TaskMetadata>;
     taskIds: Record<string, string>;

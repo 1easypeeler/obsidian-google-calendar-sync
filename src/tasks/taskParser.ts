@@ -7,6 +7,7 @@ import { LogUtils } from '../utils/logUtils';
 import { ErrorUtils } from '../utils/errorUtils';
 import { TimeUtils } from '../utils/timeUtils';
 import { hasTaskChanged } from '../utils/taskUtils';
+import { IdUtils } from '../utils/idUtils';
 import { Platform } from 'obsidian';
 
 export class TaskId {
@@ -406,6 +407,97 @@ export class TaskParser {
             LogUtils.error(`Failed to create task: ${error}`);
             throw ErrorUtils.handleCommonErrors(error);
         }
+    }
+
+    /**
+     * Walk every file matching includeFolders and append a task-id HTML comment
+     * to any task line that doesn't already have one. Runs at the start of a
+     * full sync so pre-existing un-tagged tasks get picked up without the user
+     * having to open and edit each file.
+     *
+     * Uses vault.process for atomic read-modify-write that's safe against
+     * concurrent edits in the active editor.
+     */
+    public async backfillTaskIds(): Promise<{ filesTouched: number; idsAdded: number }> {
+        const taskLinePattern = /^\s*- \[[ xX]\] /;
+        const idPattern = this.ID_PATTERN;
+        const datePattern = this.DATE_PATTERN;
+        const indentedPattern = /^    /;
+
+        const files = this.getFilteredFiles();
+        let filesTouched = 0;
+        let idsAdded = 0;
+
+        const MOBILE_BATCH_SIZE = 10;
+        const batchSize = Platform.isMobile ? MOBILE_BATCH_SIZE : files.length;
+
+        for (let i = 0; i < files.length; i += batchSize) {
+            const batch = files.slice(i, i + batchSize);
+
+            for (const file of batch) {
+                try {
+                    let addedInFile = 0;
+
+                    await this.plugin.app.vault.process(file, (content) => {
+                        const lines = content.split('\n');
+                        let modified = false;
+
+                        for (let j = 0; j < lines.length; j++) {
+                            const line = lines[j];
+
+                            // Skip indented continuation lines — they belong to a parent task
+                            if (indentedPattern.test(line)) continue;
+                            if (!taskLinePattern.test(line)) continue;
+                            if (idPattern.test(line)) continue;
+                            // Only tag tasks that will actually sync (have a 📅 date)
+                            if (!datePattern.test(line)) continue;
+
+                            const newId = IdUtils.generateTimeBasedId();
+                            const trimmedRight = line.replace(/\s+$/, '');
+                            lines[j] = `${trimmedRight} <!-- task-id: ${newId} -->`;
+
+                            // Pre-populate metadata so the freshly-tagged task is
+                            // associated with this file when the sync queue runs.
+                            const dateMatch = line.match(datePattern);
+                            const now = Date.now();
+                            this.plugin.settings.taskMetadata[newId] = {
+                                filePath: file.path,
+                                eventId: '',
+                                title: line.replace(/^\s*- \[[ xX]\] /, '').trim(),
+                                date: dateMatch?.[1] || '',
+                                completed: /^\s*- \[[xX]\]/.test(line),
+                                createdAt: now,
+                                lastModified: now,
+                                lastSynced: 0,
+                            };
+
+                            addedInFile++;
+                            modified = true;
+                        }
+
+                        return modified ? lines.join('\n') : content;
+                    });
+
+                    if (addedInFile > 0) {
+                        filesTouched++;
+                        idsAdded += addedInFile;
+                        LogUtils.debug(`Backfilled ${addedInFile} task ID(s) in ${file.path}`);
+                    }
+                } catch (error) {
+                    LogUtils.error(`Failed to backfill task IDs in ${file.path}: ${error}`);
+                }
+            }
+
+            if (Platform.isMobile && i + batchSize < files.length) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+        }
+
+        if (idsAdded > 0) {
+            await this.plugin.saveSettings();
+        }
+
+        return { filesTouched, idsAdded };
     }
 
     public async getAllTasks(): Promise<Task[]> {

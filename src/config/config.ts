@@ -26,11 +26,8 @@ export function loadGoogleCredentials(): GoogleConfig {
         };
     }
 
-    // Production credentials for distributed plugin
-    // Only the client ID is needed in the plugin now, as the client secret is stored securely in the Netlify function
-    console.log('Using built-in Google client ID');
+    // No built-in credentials — users must supply their own via settings.
     return {
-        clientId: "341568716968-82823abomit6pom4f1e2v5qvhrqf45g2.apps.googleusercontent.com"
-        // No client secret here - it's now stored securely in the Netlify function environment
+        clientId: ''
     };
 }

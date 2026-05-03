@@ -7,22 +7,33 @@ import { ErrorUtils } from '../utils/errorUtils'
 import debounce from 'just-debounce-it'
 
 
-class ZeroWidthWidget extends WidgetType {
-    constructor(readonly content: string) {
+type TaskIdDisplayMode = 'show' | 'hide' | 'truncate'
+
+const TRUNCATED_ID_CHARS = 6
+
+class TaskIdWidget extends WidgetType {
+    constructor(readonly content: string, readonly mode: TaskIdDisplayMode) {
         super()
     }
 
-    eq(other: ZeroWidthWidget) {
-        return other.content === this.content
+    eq(other: TaskIdWidget) {
+        return other.content === this.content && other.mode === this.mode
     }
 
     toDOM() {
         const wrap = document.createElement('span')
-        wrap.className = 'obsidian-gcal-task-id'
         wrap.setAttribute('aria-label', 'Task ID')
-        // Extract just the ID from the comment
         const id = this.content.match(/<!-- task-id: ([a-z0-9]+) -->/)?.[1] || ''
-        wrap.textContent = id
+
+        if (this.mode === 'hide') {
+            wrap.className = 'obsidian-gcal-task-id-hidden'
+            wrap.textContent = ''
+        } else {
+            wrap.className = 'obsidian-gcal-task-id'
+            wrap.textContent = id.length > TRUNCATED_ID_CHARS
+                ? `id:${id.slice(0, TRUNCATED_ID_CHARS)}…`
+                : `id:${id}`
+        }
         return wrap
     }
 
@@ -36,6 +47,7 @@ export class TokenController {
     private modifyLock = false
     private readonly ID_PATTERN = /<!-- task-id: ([a-z0-9]+) -->/g
     private readonly COMPLETION_PATTERN = /✅ \d{4}-\d{2}-\d{2}/g
+    private readonly DATE_PATTERN = /📅\s*\d{4}-\d{2}-\d{2}/
     private lastEditTime: number = 0
 
     constructor(plugin: GoogleCalendarSyncPlugin) {
@@ -193,7 +205,13 @@ export class TokenController {
         const doc = view.state.doc
         for (let i = 1; i <= doc.lines; i++) {
             const line = doc.line(i)
-            if (line.text.match(/^\s*- \[[ x]\] /) && !line.text.match(this.ID_PATTERN)) {
+            // Only tag tasks that will actually sync (have a 📅 date) — undated
+            // tasks get tagged the moment the user adds a date.
+            if (
+                line.text.match(/^\s*- \[[ x]\] /) &&
+                !line.text.match(this.ID_PATTERN) &&
+                this.DATE_PATTERN.test(line.text)
+            ) {
                 LogUtils.debug(`Found new task at line ${i}: ${line.text}`)
                 this.generateTaskId(view, line.from)
             }
@@ -370,6 +388,7 @@ export class TokenController {
 
     public getExtension(): Extension[] {
         const idPattern = this.ID_PATTERN;
+        const datePattern = this.DATE_PATTERN;
         const plugin = this.plugin;
         const controller = this;
 
@@ -392,7 +411,12 @@ export class TokenController {
 
                     for (let pos = startLine.from; pos <= endLine.to;) {
                         const line = doc.lineAt(pos);
-                        if (line.text.match(/^\s*- \[[ x]\] /) && !line.text.match(idPattern)) {
+                        // Only tag tasks that will actually sync (have a 📅 date)
+                        if (
+                            line.text.match(/^\s*- \[[ x]\] /) &&
+                            !line.text.match(idPattern) &&
+                            datePattern.test(line.text)
+                        ) {
                             LogUtils.debug(`Real-time task detection: Found new task at line ${line.number}`);
                             controller.generateTaskId(update.view, line.from);
                         }
@@ -510,6 +534,13 @@ export class TokenController {
                 }
 
                 const builder = new RangeSetBuilder<Decoration>()
+                const mode: TaskIdDisplayMode = plugin.settings.taskIdDisplay || 'truncate'
+
+                // 'show' mode: leave the raw HTML comment visible — no replacement decorations
+                if (mode === 'show') {
+                    return builder.finish()
+                }
+
                 const decorations: Array<{
                     from: number,
                     to: number,
@@ -531,7 +562,7 @@ export class TokenController {
                             from,
                             to,
                             decoration: Decoration.replace({
-                                widget: new ZeroWidthWidget(match[0]),
+                                widget: new TaskIdWidget(match[0], mode),
                                 block: false,
                                 side: 1  // Changed to 1 to prefer end of line
                             })

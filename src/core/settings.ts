@@ -10,6 +10,9 @@ export const DEFAULT_SETTINGS: GoogleCalendarSettings = {
     oauth2Tokens: undefined,
     syncEnabled: true,
     defaultReminder: 30,
+    calendarId: 'primary',
+    taskIdDisplay: 'truncate',
+    backfillIdsOnSync: true,
     includeFolders: [],  // Empty by default to scan all folders
     taskMetadata: {},
     taskIds: {},
@@ -67,6 +70,18 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
         containerEl.createEl('h3', { text: 'Calendar Settings' });
 
         new Setting(containerEl)
+            .setName('Calendar ID')
+            .setDesc('Google Calendar to sync tasks with. Use "primary" for your default calendar, or paste a calendar ID from Google Calendar > calendar settings > "Integrate calendar" (e.g. you@gmail.com or abc123@group.calendar.google.com). Events already synced to a different calendar are not migrated.')
+            .addText(text => text
+                .setPlaceholder('primary')
+                .setValue(this.plugin.settings.calendarId || 'primary')
+                .onChange(async (value) => {
+                    const trimmed = value.trim();
+                    this.plugin.settings.calendarId = trimmed.length > 0 ? trimmed : 'primary';
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
             .setName('Default Reminder')
             .setDesc('Default reminder time in minutes before the task (if no specific reminder is set)')
             .addText(text => text
@@ -78,6 +93,30 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                         this.plugin.settings.defaultReminder = reminder;
                         await this.plugin.saveSettings();
                     }
+                }));
+
+        new Setting(containerEl)
+            .setName('Task ID Display')
+            .setDesc('How to display the <!-- task-id: ... --> comment on synced task lines in Live Preview / Source mode. The raw text in the file is unchanged.')
+            .addDropdown(dropdown => dropdown
+                .addOption('show', 'Show full comment')
+                .addOption('truncate', 'Truncate (e.g. id:abc123…)')
+                .addOption('hide', 'Hide entirely')
+                .setValue(this.plugin.settings.taskIdDisplay || 'truncate')
+                .onChange(async (value) => {
+                    this.plugin.settings.taskIdDisplay = value as 'show' | 'hide' | 'truncate';
+                    await this.plugin.saveSettings();
+                    this.plugin.refreshEditorExtensions();
+                }));
+
+        new Setting(containerEl)
+            .setName('Backfill task IDs on sync')
+            .setDesc('When you run a full sync, scan all matching files and add task IDs to any tasks that don\'t have one yet. Without this, tasks only get IDs when you actively edit a line.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.backfillIdsOnSync ?? true)
+                .onChange(async (value) => {
+                    this.plugin.settings.backfillIdsOnSync = value;
+                    await this.plugin.saveSettings();
                 }));
 
         new Setting(containerEl)
@@ -117,13 +156,13 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                     }
                 }));
 
-        // Custom OAuth Credentials Section
-        containerEl.createEl('h3', { text: 'Custom OAuth Credentials (Advanced)' });
+        // OAuth Credentials Section
+        containerEl.createEl('h3', { text: 'Google OAuth Credentials' });
 
         const oauthDesc = containerEl.createEl('div', { cls: 'setting-item-description' });
         oauthDesc.style.marginBottom = '1em';
 
-        oauthDesc.createEl('p', { text: 'If you\'re seeing "This app is blocked" errors, you can use your own Google Cloud OAuth credentials:' });
+        oauthDesc.createEl('p', { text: 'This plugin requires your own Google Cloud OAuth credentials to authenticate with Google Calendar:' });
         const ol = oauthDesc.createEl('ol');
         const step1 = ol.createEl('li');
         step1.appendText('Go to ');
@@ -133,17 +172,13 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
         ol.createEl('li', { text: 'Go to "Credentials" \u2192 "Create Credentials" \u2192 "OAuth client ID"' });
         ol.createEl('li', { text: 'Choose "Desktop app" as the application type' });
         ol.createEl('li', { text: 'Copy the Client ID and Client Secret below' });
-        const step7 = ol.createEl('li');
-        step7.appendText('Add ');
-        step7.createEl('code', { text: 'http://127.0.0.1:8085/callback' });
-        step7.appendText(' to Authorized redirect URIs');
         const noteP = oauthDesc.createEl('p');
         noteP.createEl('strong', { text: 'Note:' });
-        noteP.appendText(' After changing credentials, disconnect and reconnect your Google account.');
+        noteP.appendText(' After changing credentials, disconnect your Google account and restart Obsidian (or disable and re-enable the plugin) before reconnecting.');
 
         new Setting(containerEl)
-            .setName('Custom Client ID')
-            .setDesc('Your Google OAuth Client ID (leave empty to use default)')
+            .setName('Client ID')
+            .setDesc('Your Google OAuth Client ID')
             .addText(text => text
                 .setPlaceholder('xxxxxx.apps.googleusercontent.com')
                 .setValue(this.plugin.settings.clientId || '')
@@ -153,8 +188,8 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Custom Client Secret')
-            .setDesc('Your Google OAuth Client Secret (leave empty to use default)')
+            .setName('Client Secret')
+            .setDesc('Your Google OAuth Client Secret')
             .addText(text => {
                 text.setPlaceholder('GOCSPX-xxxxxx')
                     .setValue(this.plugin.settings.clientSecret || '')

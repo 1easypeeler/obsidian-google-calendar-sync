@@ -769,6 +769,24 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
+    /**
+     * Force open editor views to re-evaluate StateFields that read from settings
+     * (e.g. the task-id display decoration). Dispatches a no-op transaction so
+     * the StateField update path runs and rebuilds decorations.
+     */
+    public refreshEditorExtensions(): void {
+        this.app.workspace.iterateAllLeaves(leaf => {
+            const view = leaf.view;
+            if (view instanceof MarkdownView) {
+                // @ts-ignore - cm exists on editor but is not typed
+                const cm = view.editor?.cm;
+                if (cm) {
+                    cm.dispatch({});
+                }
+            }
+        });
+    }
+
     private async syncAllTasks() {
         const state = useStore.getState();
         if (state.syncInProgress) {
@@ -779,6 +797,19 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
         try {
             state.startSync();
             state.enableTempSync();
+
+            // Backfill IDs into pre-existing un-tagged tasks before parsing,
+            // so the upcoming getAllTasks() pass picks them up.
+            if (this.settings.backfillIdsOnSync && this.taskParser) {
+                try {
+                    const result = await this.taskParser.backfillTaskIds();
+                    if (result.idsAdded > 0) {
+                        new Notice(`Tagged ${result.idsAdded} new task${result.idsAdded === 1 ? '' : 's'} across ${result.filesTouched} file${result.filesTouched === 1 ? '' : 's'}`);
+                    }
+                } catch (error) {
+                    console.error('Backfill failed (continuing with sync):', error);
+                }
+            }
 
             // Get all tasks
             const tasks = await this.taskParser?.getAllTasks() || [];
