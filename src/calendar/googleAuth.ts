@@ -82,7 +82,7 @@ export class GoogleAuthManager {
         if (settings.clientSecret && !settings.encryptedClientSecret) {
             try {
                 await this.setClientSecret(settings.clientSecret);
-                console.log('Migrated client secret from plaintext to encrypted storage');
+                LogUtils.debug('Migrated client secret from plaintext to encrypted storage');
             } catch (e) {
                 console.error('Failed to migrate client secret:', e);
                 // Use plaintext for this session, leave migration for next load
@@ -147,7 +147,7 @@ export class GoogleAuthManager {
 
     async authorize(): Promise<void> {
         try {
-            console.log('🔐 Starting OAuth flow');
+            LogUtils.debug('🔐 Starting OAuth flow');
 
             // Clean up any existing auth state
             await this.cleanup();
@@ -178,21 +178,21 @@ export class GoogleAuthManager {
             });
 
             const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-            console.log('🔐 Auth URL generated (parameters redacted for security)');
+            LogUtils.debug('🔐 Auth URL generated (parameters redacted for security)');
 
             try {
-                console.log('🔐 Waiting for auth code...');
+                LogUtils.debug('🔐 Waiting for auth code...');
                 const { code, returnedState } = await this.handleDesktopAuth(authUrl, callbackPath);
 
                 if (!returnedState || returnedState !== state) {
                     throw new Error('Invalid state parameter. Authentication failed (possible CSRF attack).');
                 }
 
-                console.log('🔐 Exchanging auth code for tokens (PKCE)...');
+                LogUtils.debug('🔐 Exchanging auth code for tokens (PKCE)...');
                 await this.handlePKCEAuthCode(code);
-                console.log('🔐 Token exchange completed successfully');
+                LogUtils.debug('🔐 Token exchange completed successfully');
 
-                console.log('✅ Authorization successful, initializing calendar sync');
+                LogUtils.debug('✅ Authorization successful, initializing calendar sync');
                 this.plugin.initializeCalendarSync();
                 new Notice('Successfully connected to Google Calendar!');
             } catch (authError) {
@@ -205,7 +205,7 @@ export class GoogleAuthManager {
 
             // Enhanced error handling
             if (error.code === 'EADDRINUSE') {
-                console.log('Port already in use, running cleanup...');
+                LogUtils.debug('Port already in use, running cleanup...');
                 await this.cleanup();
                 new Notice('Port 8085 is already in use. We attempted to free it. Please try again in a moment.');
             } else if (error.code === 'EACCES') {
@@ -233,15 +233,15 @@ export class GoogleAuthManager {
                 throw new Error('Code verifier not found. Please restart the authentication process.');
             }
 
-            console.log('🔄 Exchanging auth code for tokens using PKCE flow');
-            console.log('Redirect URI:', this.redirectUri);
+            LogUtils.debug('🔄 Exchanging auth code for tokens using PKCE flow');
+            LogUtils.debug('Redirect URI:', this.redirectUri);
 
             const clientSecret = await this.getClientSecret();
             if (!clientSecret) {
                 throw new Error('Client Secret is required. Please configure it in plugin settings.');
             }
 
-            console.log('🔄 Exchanging auth code with PKCE');
+            LogUtils.debug('🔄 Exchanging auth code with PKCE');
             const response = await requestUrl({
                 url: GOOGLE_TOKEN_ENDPOINT,
                 method: 'POST',
@@ -258,7 +258,7 @@ export class GoogleAuthManager {
                 }).toString()
             });
 
-            console.log('Token exchange response status:', response.status);
+            LogUtils.debug('Token exchange response status:', response.status);
 
             if (response.status >= 400) {
                 console.error('❌ Error response from token exchange:', response.status, LogUtils.sanitize(response.text));
@@ -279,7 +279,7 @@ export class GoogleAuthManager {
             };
 
             await this.saveTokens(tokens);
-            console.log('✅ Successfully exchanged code for tokens using PKCE flow');
+            LogUtils.debug('✅ Successfully exchanged code for tokens using PKCE flow');
 
         } catch (error) {
             console.error('❌ PKCE token exchange failed:', error instanceof Error ? error.message : 'Unknown error');
@@ -313,7 +313,7 @@ export class GoogleAuthManager {
         expectedPath: string
     ): Promise<{ code: string; returnedState: string | null }> {
         return new Promise((resolve, reject) => {
-            console.log('🔍 Starting local auth server on port', DESKTOP_PORT);
+            LogUtils.debug('🔍 Starting local auth server on port', DESKTOP_PORT);
 
             try {
                 let server: any;
@@ -332,13 +332,13 @@ export class GoogleAuthManager {
                     if (authWindow && authWindow.closed && !authCancelled) {
                         authCancelled = true;
                         cleanup(windowCheckInterval);
-                        console.log('Auth window was closed prematurely by user');
+                        LogUtils.debug('Auth window was closed prematurely by user');
                         try {
                             if (server) {
-                                server.close(() => console.log('Server closed after user closed auth window'));
+                                server.close(() => LogUtils.debug('Server closed after user closed auth window'));
                             }
                         } catch (e) {
-                            console.log('Error closing server after auth window closed:', e);
+                            LogUtils.debug('Error closing server after auth window closed:', e);
                         }
                         reject(new Error('User closed the auth window'));
                     }
@@ -371,17 +371,17 @@ export class GoogleAuthManager {
                                 res.writeHead(400, { 'Content-Type': 'text/html' });
                                 res.end(`<html><body><h1>Authentication failed</h1><p>Error: ${error}</p></body></html>`);
                                 cleanup(windowCheckInterval);
-                                server.close(() => console.log('🔒 Server closed after error'));
+                                server.close(() => LogUtils.debug('🔒 Server closed after error'));
                                 reject(new Error(`Authentication error: ${error}`));
                                 return;
                             }
 
                             if (code) {
-                                console.log('✅ Received auth code via loopback');
+                                LogUtils.debug('✅ Received auth code via loopback');
                                 res.writeHead(200, { 'Content-Type': 'text/html' });
                                 res.end(`<html><body><h1>Authentication successful!</h1><p>You can now close this window and return to Obsidian.</p></body></html>`);
                                 cleanup(windowCheckInterval);
-                                server.close(() => console.log('🔒 Server closed successfully'));
+                                server.close(() => LogUtils.debug('🔒 Server closed successfully'));
                                 resolve({ code, returnedState });
                             }
                         } catch (error) {
@@ -395,8 +395,8 @@ export class GoogleAuthManager {
 
                     server.listen(DESKTOP_PORT, DESKTOP_HOST)
                         .once('listening', () => {
-                            console.log(`✅ Server listening on ${DESKTOP_HOST}:${DESKTOP_PORT}`);
-                            console.log('🌐 Opening auth URL in browser (URL redacted)');
+                            LogUtils.debug(`✅ Server listening on ${DESKTOP_HOST}:${DESKTOP_PORT}`);
+                            LogUtils.debug('🌐 Opening auth URL in browser (URL redacted)');
 
                             // Try to open auth window using shell.openExternal for desktop
                             try {
@@ -406,10 +406,10 @@ export class GoogleAuthManager {
                                 try {
                                     authWindow = window.open('', 'googleAuth');
                                 } catch (trackErr) {
-                                    console.log('Unable to track auth window:', trackErr);
+                                    LogUtils.debug('Unable to track auth window:', trackErr);
                                 }
                             } catch (e) {
-                                console.log('Failed to open with electron shell, falling back to window.open:', e);
+                                LogUtils.debug('Failed to open with electron shell, falling back to window.open:', e);
                                 try {
                                     authWindow = window.open(authUrl, 'googleAuth', 'width=800,height=600');
                                     if (!authWindow) {
@@ -448,12 +448,12 @@ export class GoogleAuthManager {
                         cleanup(windowCheckInterval);
                         try {
                             if (server) {
-                                server.close(() => console.log('🔒 Server closed after timeout'));
+                                server.close(() => LogUtils.debug('🔒 Server closed after timeout'));
                             }
                         } catch (e) {
-                            console.log('Error closing server:', e);
+                            LogUtils.debug('Error closing server:', e);
                         }
-                        console.log('⏱️ Authentication timed out');
+                        LogUtils.debug('⏱️ Authentication timed out');
                         new Notice('Authentication timed out. Please try again.');
                         reject(new Error('Authentication timed out'));
                     }
@@ -492,7 +492,7 @@ export class GoogleAuthManager {
                 throw new Error('Client Secret is required. Please configure it in plugin settings.');
             }
 
-            console.log('🔄 Refreshing access token');
+            LogUtils.debug('🔄 Refreshing access token');
             const response = await requestUrl({
                 url: GOOGLE_TOKEN_ENDPOINT,
                 method: 'POST',
@@ -506,7 +506,7 @@ export class GoogleAuthManager {
                     grant_type: 'refresh_token',
                 }).toString()
             });
-            console.log('🔄 Google OAuth response status:', response.status);
+            LogUtils.debug('🔄 Google OAuth response status:', response.status);
             if (response.status >= 400) {
                 console.error('Token refresh failed with status', response.status, LogUtils.sanitize(response.text));
                 throw new Error(`Token refresh failed with status ${response.status}`);
@@ -525,7 +525,7 @@ export class GoogleAuthManager {
                 expiry_date: Date.now() + response.json.expires_in * 1000
             };
 
-            console.log('Successfully refreshed access token, expires in:', response.json.expires_in);
+            LogUtils.debug('Successfully refreshed access token, expires in:', response.json.expires_in);
             await this.saveTokens(tokens);
             return tokens;
         } catch (error) {
@@ -566,7 +566,7 @@ export class GoogleAuthManager {
                 this.plugin.settings.oauth2Tokens = undefined; // Clear any legacy plaintext
                 await this.plugin.saveSettings();
 
-                console.log(`Tokens saved. Access token valid until: ${new Date(this.tokenExpiry || 0).toLocaleString()}`);
+                LogUtils.debug(`Tokens saved. Access token valid until: ${new Date(this.tokenExpiry || 0).toLocaleString()}`);
             } catch (error) {
                 console.error('Error saving authentication tokens:', error);
                 LogUtils.error('Failed to save authentication tokens');
@@ -601,7 +601,7 @@ export class GoogleAuthManager {
                     return false;
                 }
             } else if (this.plugin.settings.oauth2Tokens?.access_token) {
-                console.log('Migrating legacy plaintext tokens to encrypted storage');
+                LogUtils.debug('Migrating legacy plaintext tokens to encrypted storage');
                 tokens = this.plugin.settings.oauth2Tokens;
                 needsResave = true;
             }
@@ -625,7 +625,7 @@ export class GoogleAuthManager {
             }
 
             if (this.tokenExpiry && Date.now() >= this.tokenExpiry) {
-                console.log('Saved token expired, refreshing...');
+                LogUtils.debug('Saved token expired, refreshing...');
                 try {
                     const newTokens = await this.refreshAccessToken();
                     return !!newTokens.access_token;
@@ -687,7 +687,7 @@ export class GoogleAuthManager {
                     url: `https://oauth2.googleapis.com/revoke?token=${this.accessToken}`,
                     method: 'POST'
                 });
-                console.log('Successfully revoked access token');
+                LogUtils.debug('Successfully revoked access token');
             } catch (error) {
                 console.error('Error revoking token:', error);
             }
@@ -704,18 +704,18 @@ export class GoogleAuthManager {
             this.plugin.settings.encryptedOAuth2Tokens = undefined;
             this.plugin.settings.tokensEncrypted = false;
             await this.plugin.saveSettings();
-            console.log('Cleared tokens from settings');
+            LogUtils.debug('Cleared tokens from settings');
         }
     }
 
     public async cleanup(): Promise<void> {
-        console.log('🧹 Starting cleanup process');
+        LogUtils.debug('🧹 Starting cleanup process');
 
         try {
             const net = require('net');
 
             // Try more aggressive socket connection to force close the port
-            console.log('Attempting to connect to port to force it closed');
+            LogUtils.debug('Attempting to connect to port to force it closed');
             const client = new net.Socket();
 
             // Set a very short timeout for the connection
@@ -723,18 +723,18 @@ export class GoogleAuthManager {
 
             await new Promise<void>((resolve) => {
                 client.once('error', (err: NodeJS.ErrnoException) => {
-                    console.log(`Socket connection error (expected if port not in use): ${err.code}`);
+                    LogUtils.debug(`Socket connection error (expected if port not in use): ${err.code}`);
                     resolve();
                 });
 
                 client.once('timeout', () => {
-                    console.log('Socket connection timeout');
+                    LogUtils.debug('Socket connection timeout');
                     client.destroy();
                     resolve();
                 });
 
                 client.once('connect', () => {
-                    console.log('Successfully connected to server, sending FIN packet');
+                    LogUtils.debug('Successfully connected to server, sending FIN packet');
                     client.destroy();
                     resolve();
                 });
@@ -742,7 +742,7 @@ export class GoogleAuthManager {
                 try {
                     client.connect(DESKTOP_PORT, DESKTOP_HOST);
                 } catch (e) {
-                    console.log('Error during connect attempt:', e);
+                    LogUtils.debug('Error during connect attempt:', e);
                     resolve();
                 }
             });
@@ -751,18 +751,18 @@ export class GoogleAuthManager {
             try {
                 const existingWindow = window.open('', 'googleAuth');
                 if (existingWindow) {
-                    console.log('Found existing auth window, closing it');
+                    LogUtils.debug('Found existing auth window, closing it');
                     existingWindow.close();
                 }
             } catch (e) {
-                console.log('Error closing existing auth window:', e);
+                LogUtils.debug('Error closing existing auth window:', e);
             }
 
         } catch (e) {
-            console.log('Error during server cleanup:', e);
+            LogUtils.debug('Error during server cleanup:', e);
         }
 
-        console.log('🧹 Cleanup process completed');
+        LogUtils.debug('🧹 Cleanup process completed');
     }
 
     isAuthenticated(): boolean {
@@ -792,11 +792,11 @@ export class GoogleAuthManager {
             // longer accepted (revoked, expired idle for >6mo, scope changes, etc.).
             // Network errors and other failures should not log the user out.
             if (/status (400|401)/.test(message) || message.includes('No refresh token')) {
-                console.log('Refresh token rejected on load — clearing stored auth state');
+                LogUtils.debug('Refresh token rejected on load — clearing stored auth state');
                 await this.clearStoredTokens();
                 return 'revoked';
             }
-            console.log('Token validation failed transiently, keeping stored state:', message);
+            LogUtils.debug('Token validation failed transiently, keeping stored state:', message);
             return 'transient';
         }
     }

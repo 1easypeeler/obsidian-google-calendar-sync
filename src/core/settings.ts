@@ -41,10 +41,7 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Google Calendar Sync Settings' });
-
-        // Sync Settings Section
-        containerEl.createEl('h3', { text: 'Sync Settings' });
+        // Sync section (general settings go first without a heading per Obsidian guidelines)
 
         new Setting(containerEl)
             .setName('Auto-sync')
@@ -73,8 +70,8 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        // Calendar Settings Section
-        containerEl.createEl('h3', { text: 'Calendar Settings' });
+        // Calendar section
+        new Setting(containerEl).setName('Calendar').setHeading();
 
         new Setting(containerEl)
             .setName('Calendar ID')
@@ -152,11 +149,10 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        // OAuth Credentials Section
-        containerEl.createEl('h3', { text: 'Google OAuth Credentials' });
+        // OAuth Credentials section
+        new Setting(containerEl).setName('Google OAuth credentials').setHeading();
 
-        const oauthDesc = containerEl.createEl('div', { cls: 'setting-item-description' });
-        oauthDesc.style.marginBottom = '1em';
+        const oauthDesc = containerEl.createEl('div', { cls: 'setting-item-description gcal-oauth-description' });
 
         oauthDesc.createEl('p', { text: 'This plugin requires your own Google Cloud OAuth credentials to authenticate with Google Calendar:' });
         const ol = oauthDesc.createEl('ol');

@@ -160,6 +160,11 @@
     font-size: var(--font-ui-smaller);
 }
 
+/* OAuth description spacing */
+.gcal-oauth-description {
+    margin-bottom: 1em;
+}
+
 /* Settings styles */
 .plugin-info {
     padding: 10px;

@@ -1,4 +1,4 @@
-import { Plugin, Notice, Menu, MenuItem, Editor, TFile, TAbstractFile, MarkdownView } from 'obsidian';
+import { Plugin, Notice, Menu, MenuItem, Editor, TFile, TAbstractFile, MarkdownView, normalizePath } from 'obsidian';
 import { GoogleAuthManager } from '../calendar/googleAuth';
 import { TaskParser } from '../tasks/taskParser';
 import { CalendarSync } from '../calendar/calendarSync';
@@ -31,7 +31,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
 
     async onload() {
         try {
-            console.log('Loading Google Calendar Sync plugin...');
+            LogUtils.debug('Loading Google Calendar Sync plugin...');
 
             // Load settings first
             await this.loadSettings();
@@ -399,7 +399,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             const isAuthenticatedFromHandler = useStore.getState().authenticated;
             if (!await this.verifyAuthentication(isAuthenticatedFromHandler)) {
                 useStore.getState().setStatus('disconnected');
-                console.log('Authentication verification failed, not initializing calendar sync');
+                LogUtils.debug('Authentication verification failed, not initializing calendar sync');
                 return;
             }
 
@@ -423,7 +423,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                 (error.message.includes('Authentication') ||
                     error.message.includes('auth') ||
                     error.message.includes('401'))) {
-                console.log('Auth-related error detected, marking as disconnected');
+                LogUtils.debug('Auth-related error detected, marking as disconnected');
                 useStore.getState().setStatus('disconnected');
                 useStore.getState().setAuthenticated(false);
 
@@ -449,7 +449,10 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
 
         for (const file of files) {
             if (this.settings.includeFolders.length > 0 &&
-                !this.settings.includeFolders.some(folder => file.path.startsWith(folder))) {
+                !this.settings.includeFolders.some(folder => {
+                    const normalized = normalizePath(folder);
+                    return file.path === normalized || file.path.startsWith(normalized + '/');
+                })) {
                 continue;
             }
             try {
@@ -464,7 +467,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
 
     async onunload() {
         try {
-            console.log('🔄 Unloading Google Calendar Sync plugin...');
+            LogUtils.debug('Unloading Google Calendar Sync plugin...');
 
             // Clear periodic cleanup interval to prevent memory leak
             if (this.cleanupInterval) {
@@ -509,7 +512,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             // Reset store state last
             useStore.getState().reset();
 
-            console.log('Plugin cleanup completed');
+            LogUtils.debug('Plugin cleanup completed');
         } catch (error) {
             console.error('❌ Error during plugin cleanup:', error);
         }
@@ -657,7 +660,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                     try {
                         new Notice('Starting repair process...');
                         await this.repairManager.repairSyncState(
-                            (progress) => console.log(`Repair progress: ${progress.phase} - ${progress.processedItems}/${progress.totalItems}`)
+                            (progress) => LogUtils.debug(`Repair progress: ${progress.phase} - ${progress.processedItems}/${progress.totalItems}`)
                         );
                         new Notice('Repair completed successfully');
                     } catch (error) {
@@ -706,7 +709,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
     private async syncAllTasks() {
         const state = useStore.getState();
         if (state.syncInProgress) {
-            console.log('🔄 Sync already in progress');
+            LogUtils.debug('Sync already in progress');
             return;
         }
 
@@ -729,23 +732,23 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
 
             // Get all tasks
             const tasks = await this.taskParser?.getAllTasks() || [];
-            console.log(`Found ${tasks.length} tasks to sync`);
+            LogUtils.debug(`Found ${tasks.length} tasks to sync`);
 
             // Get all Obsidian events from calendar
             const allTaskIds = new Set(tasks.map(t => t.id));
             const calendarEvents = await this.calendarSync?.findAllObsidianEvents() || [];
-            console.log(`Found ${calendarEvents.length} Obsidian events in calendar`);
+            LogUtils.debug(`Found ${calendarEvents.length} Obsidian events in calendar`);
 
             // Clean up orphaned events and metadata
             if (this.repairManager) {
                 await this.repairManager.deleteOrphanedEvents(
                     calendarEvents,
                     allTaskIds,
-                    (progress) => console.log(`Cleanup progress: ${progress.phase} - ${progress.processedItems}/${progress.totalItems}`)
+                    (progress) => LogUtils.debug(`Cleanup progress: ${progress.phase} - ${progress.processedItems}/${progress.totalItems}`)
                 );
                 await this.repairManager.cleanupOrphanedMetadata(
                     allTaskIds,
-                    (progress) => console.log(`Cleanup progress: ${progress.phase} - ${progress.processedItems}/${progress.totalItems}`)
+                    (progress) => LogUtils.debug(`Cleanup progress: ${progress.phase} - ${progress.processedItems}/${progress.totalItems}`)
                 );
             }
 
@@ -756,7 +759,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             await this.saveSettings();
             state.endSync(true);
             new Notice('Tasks synced with Google Calendar');
-            console.log('✅ Full sync completed');
+            LogUtils.debug('Full sync completed');
         } catch (error) {
             console.error('❌ Sync failed:', error);
             state.endSync(false);
@@ -808,38 +811,11 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             return true;
         }
 
-        // Get the include settings
-        const includeSettings = this.settings.includeFolders;
-
-        // Check for direct file match
-        if (includeSettings.some(path => path === file.path)) {
-            return true;
-        }
-
-        // Check if file is in included folders with strict matching
-        if (includeSettings.some(folder => {
-            // Skip if this is a direct file reference (likely ends with .md)
-            if (!folder.endsWith('/') && folder.includes('.')) {
-                return false;
-            }
-            return file.path.startsWith(folder + '/');
-        })) {
-            return true;
-        }
-
-        // Try more lenient matching (without requiring trailing slash)
-        if (includeSettings.some(folder => {
-            // Skip if this is a direct file reference
-            if (!folder.endsWith('/') && folder.includes('.')) {
-                return false;
-            }
-            const folderNoSlash = folder.endsWith('/') ? folder.slice(0, -1) : folder;
-            return file.path.startsWith(folderNoSlash + '/');
-        })) {
-            return true;
-        }
-
-        return false;
+        // Check if file matches any included path (normalized)
+        return this.settings.includeFolders.some(rawPath => {
+            const normalized = normalizePath(rawPath);
+            return file.path === normalized || file.path.startsWith(normalized + '/');
+        });
     }
 
     /**
@@ -849,7 +825,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
     private async verifyAuthentication(skipPrompt = false): Promise<boolean> {
         // First check the store state - if we were just authenticated via protocol handler
         if (useStore.getState().authenticated) {
-            console.log('Already authenticated according to store state');
+            LogUtils.debug('Already authenticated according to store state');
             return true;
         }
 
@@ -860,7 +836,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                 await this.authManager.getValidAccessToken();
                 return true;
             } catch (error) {
-                console.log('Token verification failed:', error);
+                LogUtils.debug('Token verification failed:', error);
                 // Token might be invalid, proceed to authentication flow
             }
         }
@@ -879,7 +855,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
         );
 
         if (confirmConnection) {
-            console.log('🔍 Not authenticated, redirecting to auth flow');
+            LogUtils.debug('Not authenticated, redirecting to auth flow');
             if (this.authManager) {
                 await this.authManager.authorize();
                 // Auth flow will handle initializing calendar sync if successful
@@ -887,7 +863,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             }
             return false;
         } else {
-            console.log('ℹ️ User declined to authenticate');
+            LogUtils.debug('User declined to authenticate');
             return false;
         }
     }

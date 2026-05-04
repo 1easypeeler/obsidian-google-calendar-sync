@@ -8,7 +8,7 @@ import * as dotenv from 'dotenv';
 try {
     dotenv.config();
 } catch (e) {
-    console.log('Dotenv not available, skipping .env loading (this is normal on mobile)');
+    // Dotenv not available — expected in production builds
 }
 
 // Environment variables to use in production
@@ -26,10 +26,8 @@ export function loadGoogleCredentials(): GoogleConfig {
         };
     }
 
-    // For development/testing - use placeholders
-    console.warn('No client ID found. Set GOOGLE_CLIENT_ID environment variable.');
+    // No built-in credentials — users must supply their own via settings.
     return {
-        clientId: "PLACEHOLDER_CLIENT_ID",  // Never use real credentials here
-        // No client secret needed in the plugin as it's stored securely in the Netlify function
+        clientId: ''
     };
 }

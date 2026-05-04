@@ -8,7 +8,7 @@ import * as dotenv from 'dotenv';
 try {
     dotenv.config();
 } catch (e) {
-    console.log('Dotenv not available, skipping .env loading (this is normal on mobile)');
+    // Dotenv not available — expected in production builds
 }
 
 // Environment variables to use in production

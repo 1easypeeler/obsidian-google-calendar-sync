@@ -1,4 +1,4 @@
-import { TFile, Notice, MarkdownView } from 'obsidian';
+import { TFile, Notice, MarkdownView, normalizePath } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import type { Task, TaskMetadata, ParsedTaskData } from '../core/types';
 import type GoogleCalendarSyncPlugin from '../core/main';
@@ -36,56 +36,41 @@ export class TaskParser {
             return allFiles;
         }
 
-        // Create result array for matched files
+        // Create result set for matched file paths (deduplication)
+        const matchedPaths = new Set<string>();
         const matchedFiles: TFile[] = [];
 
         // Process each inclusion path
-        for (const includePath of this.plugin.settings.includeFolders) {
-            // Check if this is a direct file reference (not ending with /)
-            const isLikelyFile = !includePath.endsWith('/') && includePath.includes('.');
+        for (const rawPath of this.plugin.settings.includeFolders) {
+            const normalized = normalizePath(rawPath);
 
-            if (isLikelyFile) {
-                // Try to get this specific file
-                const exactFile = allFiles.find(file => file.path === includePath);
-                if (exactFile) {
+            // Try as a direct file reference first
+            const abstract = this.plugin.app.vault.getAbstractFileByPath(normalized);
+            const exactFile = abstract instanceof TFile ? abstract : null;
+            if (exactFile) {
+                if (!matchedPaths.has(exactFile.path)) {
+                    matchedPaths.add(exactFile.path);
                     matchedFiles.push(exactFile);
-                    continue;
                 }
-            }
-
-            // Handle as folder (strict matching with trailing slash)
-            const folderMatchedFiles = allFiles.filter(file =>
-                file.path === includePath || file.path.startsWith(includePath + '/')
-            );
-
-            if (folderMatchedFiles.length > 0) {
-                matchedFiles.push(...folderMatchedFiles);
                 continue;
             }
 
-            // Try lenient folder matching (without trailing slash)
-            const folderNoSlash = includePath.endsWith('/') ? includePath.slice(0, -1) : includePath;
-            const lenientMatches = allFiles.filter(file =>
-                file.path === folderNoSlash || file.path.startsWith(folderNoSlash + '/')
-            );
-
-            if (lenientMatches.length > 0) {
-                matchedFiles.push(...lenientMatches);
+            // Otherwise treat as a folder — match all markdown files under it
+            for (const file of allFiles) {
+                if (file.path.startsWith(normalized + '/') && !matchedPaths.has(file.path)) {
+                    matchedPaths.add(file.path);
+                    matchedFiles.push(file);
+                }
             }
         }
 
-        // Remove duplicates
-        const uniqueFiles = Array.from(new Set(matchedFiles.map(file => file.path)))
-            .map(path => allFiles.find(file => file.path === path))
-            .filter((file): file is TFile => file !== undefined);
-
         // If no files found after all approaches, use all files with a warning
-        if (uniqueFiles.length === 0) {
+        if (matchedFiles.length === 0) {
             LogUtils.warn(`No files match folder inclusion settings. Using all files as fallback. Check your settings.`);
             return allFiles;
         }
 
-        return uniqueFiles;
+        return matchedFiles;
     }
 
     public async parseTasksFromFile(file: TFile): Promise<Task[]> {
@@ -97,7 +82,10 @@ export class TaskParser {
 
         // Check if file is in included folders
         if (this.plugin.settings.includeFolders.length > 0 &&
-            !this.plugin.settings.includeFolders.some(folder => file.path.startsWith(folder))) {
+            !this.plugin.settings.includeFolders.some(folder => {
+                const normalized = normalizePath(folder);
+                return file.path === normalized || file.path.startsWith(normalized + '/');
+            })) {
             LogUtils.debug(`File ${file.path} not in included folders, skipping`);
             return [];
         }

@@ -19,17 +19,19 @@ export class LogUtils {
     }
 
     /**
-     * Info level logging
+     * Info level logging — only shown when verbose logging is enabled
      */
     static info(message: string, ...args: any[]) {
-        console.log(`${LOG_LEVELS.INFO} ${message}`, ...args);
+        if (this.plugin?.settings.verboseLogging) {
+            console.log(`${LOG_LEVELS.INFO} ${message}`, ...args);
+        }
     }
 
     /**
      * Warning level logging
      */
     static warn(message: string, ...args: any[]) {
-        console.log(`${LOG_LEVELS.WARN} ${message}`, ...args);
+        console.warn(`${LOG_LEVELS.WARN} ${message}`, ...args);
     }
 
     /**
@@ -40,10 +42,12 @@ export class LogUtils {
     }
 
     /**
-     * Success level logging
+     * Success level logging — only shown when verbose logging is enabled
      */
     static success(message: string, ...args: any[]) {
-        console.log(`${LOG_LEVELS.SUCCESS} ${message}`, ...args);
+        if (this.plugin?.settings.verboseLogging) {
+            console.log(`${LOG_LEVELS.SUCCESS} ${message}`, ...args);
+        }
     }
 
     /**
@@ -88,9 +92,13 @@ export class LogUtils {
     }
 
     /**
-     * Group related logs together
+     * Group related logs together — only shown when verbose logging is enabled
      */
     static group(name: string, fn: () => void) {
+        if (!this.plugin?.settings.verboseLogging) {
+            fn();
+            return;
+        }
         console.group(`${LOG_LEVELS.INFO} ${name}`);
         try {
             fn();
