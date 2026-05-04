@@ -33,8 +33,8 @@ The plugin tracks tasks using HTML comments embedded at the end of each task lin
 
 ## Installation
 
-1. Download `main.js` and `manifest.json` from the [latest release](https://github.com/1easypeeler/obsidian-gcal-sync/releases)
-2. Copy both files into `<vault>/.obsidian/plugins/obsidian-gcal-sync/`
+1. Download `obsidian-gcal-sync.zip` from the [latest release](https://github.com/1easypeeler/obsidian-gcal-sync/releases/latest)
+2. Extract the zip into `<vault>/.obsidian/plugins/` — this creates the `obsidian-gcal-sync` folder with all required files
 3. Restart Obsidian and enable the plugin under Settings → Community Plugins
 
 ---
