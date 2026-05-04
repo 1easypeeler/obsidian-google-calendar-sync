@@ -35,6 +35,9 @@ yarn-error.log*
 *.swp
 *.swo
 
+# Claude Code session data
+.claude/
+
 # Local scripts
 plugin-reload.sh 
 build.sh
