@@ -1,24 +1,17 @@
 /**
- * SecureStorage — secret-at-rest encryption with platform-appropriate backends.
+ * SecureStorage — secret-at-rest encryption via Electron `safeStorage`.
  *
- * Desktop: Electron `safeStorage` (OS keychain on macOS, DPAPI on Windows,
- *          libsecret on Linux). Real protection — keys never touch disk.
- *
- * Mobile:  AES-256-GCM with a key derived from the vault path. This is
- *          *obfuscation*, not protection — anyone who can read the vault
- *          can re-derive the key. Mobile platforms expose no equivalent
- *          to safeStorage from a plugin sandbox; honest naming and a
- *          documented fallback are the best we can do.
+ * Desktop-only: uses the OS keychain (macOS Keychain, Windows DPAPI,
+ * Linux libsecret). Keys never touch disk.
  *
  * Wire format (v2): JSON `{ v, method, payload }`.
  *   - method 'safeStorage' — payload is base64 of safeStorage ciphertext
- *   - method 'aes-pbkdf2'  — payload is the legacy PBKDF2/AES-GCM string
  *
- * Legacy decode: a non-JSON blob is treated as a v1 PBKDF2 ciphertext
- * (the format used before this module existed) and decrypted accordingly.
+ * Legacy decode: a non-JSON blob or a v2 blob with method 'aes-pbkdf2'
+ * is decrypted via CryptoUtils for one-time migration, then re-saved in
+ * the safeStorage format on next write.
  */
 
-import { Platform } from 'obsidian';
 import { CryptoUtils } from './cryptoUtils';
 
 const FORMAT_VERSION = 2;
@@ -44,8 +37,6 @@ export class SecureStorage {
         if (this.safeStorageProbed) return this.safeStorage;
         this.safeStorageProbed = true;
 
-        if (Platform.isMobile) return null;
-
         try {
             const electron = require('electron');
             const safeStorage = electron?.safeStorage || electron?.remote?.safeStorage;
@@ -57,7 +48,7 @@ export class SecureStorage {
                 this.safeStorage = safeStorage;
             }
         } catch {
-            // Electron not available, or context isolation blocks it. Fall back.
+            // Electron not available, or context isolation blocks it.
         }
         return this.safeStorage;
     }
@@ -67,31 +58,28 @@ export class SecureStorage {
     }
 
     /**
-     * Encrypt a plaintext string. `fallbackKey` is only used when safeStorage
-     * is unavailable (mobile, or desktop without a working keyring).
+     * Encrypt a plaintext string. `fallbackKey` is accepted for API
+     * compatibility but is not used — desktop always has safeStorage.
      */
     static async encrypt(plaintext: string, fallbackKey: CryptoKey): Promise<string> {
         const safeStorage = this.getSafeStorage();
-        if (safeStorage) {
-            const encrypted: Buffer = safeStorage.encryptString(plaintext);
-            return JSON.stringify({
-                v: FORMAT_VERSION,
-                method: 'safeStorage',
-                payload: encrypted.toString('base64'),
-            } satisfies SecureBlob);
+        if (!safeStorage) {
+            throw new Error(
+                'OS keychain (safeStorage) is not available. This plugin requires desktop Obsidian.'
+            );
         }
 
-        const obfuscated = await CryptoUtils.encrypt(plaintext, fallbackKey);
+        const encrypted: Buffer = safeStorage.encryptString(plaintext);
         return JSON.stringify({
             v: FORMAT_VERSION,
-            method: 'aes-pbkdf2',
-            payload: obfuscated,
+            method: 'safeStorage',
+            payload: encrypted.toString('base64'),
         } satisfies SecureBlob);
     }
 
     /**
-     * Decrypt a blob produced by `encrypt`. Also accepts legacy v1 blobs
-     * (raw PBKDF2 ciphertext, not JSON) for one-time migration.
+     * Decrypt a blob produced by `encrypt`. Also accepts legacy blobs
+     * (v1 raw PBKDF2 ciphertext or v2 aes-pbkdf2) for one-time migration.
      */
     static async decrypt(blob: string, fallbackKey: CryptoKey): Promise<string> {
         let parsed: SecureBlob | null = null;
@@ -104,7 +92,7 @@ export class SecureStorage {
         }
 
         if (!parsed) {
-            // Legacy v1: opaque base64 PBKDF2 ciphertext.
+            // Legacy v1: opaque base64 PBKDF2 ciphertext — migrate on next save.
             return CryptoUtils.decrypt(blob, fallbackKey);
         }
 
@@ -120,6 +108,8 @@ export class SecureStorage {
         }
 
         if (parsed.method === 'aes-pbkdf2') {
+            // Legacy v2 mobile format — decrypt for migration, next save
+            // will re-encrypt with safeStorage.
             return CryptoUtils.decrypt(parsed.payload, fallbackKey);
         }
 

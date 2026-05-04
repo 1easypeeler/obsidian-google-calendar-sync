@@ -10,7 +10,7 @@ This plugin syncs Obsidian Tasks to Google Calendar as events — one-way, from 
 - Manual sync, repair, and disconnect via the ribbon
 - Task dates, start/end times, and per-task reminders
 - Configurable target calendar (any calendar in your Google account, not just the default)
-- Selective folder sync and mobile support
+- Selective folder sync
 
 ### How task IDs work
 
@@ -64,20 +64,11 @@ This plugin requires your own Google Cloud OAuth credentials. There are no share
 
 ### 3. Authenticate
 
-**Desktop (Windows, macOS, Linux)**
-
 1. Click the plugin icon in the ribbon
 2. Your browser will open for OAuth authorisation
 3. Grant the requested permissions
 4. A local callback server on port 8085 completes the handshake
 5. Return to Obsidian — a success notice confirms authentication
-
-**Mobile (iOS, Android)**
-
-1. Enter credentials in settings (or sync your vault after authenticating on desktop)
-2. Tap the plugin icon in the ribbon
-3. Authorise in your browser — you will be redirected back to Obsidian automatically
-4. A success notice confirms authentication
 
 ---
 
@@ -123,13 +114,6 @@ All settings are under Settings → Google Calendar Sync.
 | **Backfill task IDs on sync** | On a full sync, scan all matching files and tag any dated, un-IDed tasks before syncing. On by default |
 | **Verbose Logging** | Write detailed debug output to the developer console |
 
-### Mobile Optimizations
-
-| Setting | Description |
-|---|---|
-| **Enable Mobile Optimizations** | Apply mobile-specific performance optimisations |
-| **Mobile Sync File Limit** | Maximum number of files to scan on mobile. Lower values improve performance on large vaults |
-
 ### Google OAuth Credentials
 
 | Setting | Description |
@@ -158,7 +142,7 @@ The icon updates dynamically to reflect current sync status.
 
 - **Your own credentials** — no shared OAuth client IDs; your data stays within your own Google project
 - **OAuth 2.0 with PKCE** — Proof Key for Code Exchange (S256) prevents authorisation code interception on the loopback redirect
-- **Encrypted credential storage** — the Client Secret is encrypted via the OS keychain on desktop (Electron `safeStorage`: macOS Keychain, Windows DPAPI, Linux libsecret) and AES-GCM on mobile. OAuth tokens follow the same path
+- **Encrypted credential storage** — the Client Secret is encrypted via the OS keychain (Electron `safeStorage`: macOS Keychain, Windows DPAPI, Linux libsecret). OAuth tokens follow the same path
 - **No external proxies** — the OAuth flow goes directly between Obsidian and Google; no third-party relay servers are involved
 - **Credential-safe logging** — tokens, secrets, and authorisation codes are scrubbed before anything is written to the developer console
 - **Startup token validation** — on launch the plugin silently probes whether stored tokens are still valid and clears them cleanly if revoked, prompting re-authentication rather than failing silently

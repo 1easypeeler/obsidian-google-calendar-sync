@@ -8,7 +8,6 @@ import { ErrorUtils } from '../utils/errorUtils';
 import { TimeUtils } from '../utils/timeUtils';
 import { hasTaskChanged } from '../utils/taskUtils';
 import { IdUtils } from '../utils/idUtils';
-import { Platform } from 'obsidian';
 
 export class TaskId {
     private static readonly PATTERN = /<!-- task-id: [a-z0-9]+ -->/;
@@ -109,19 +108,13 @@ export class TaskParser {
             // Invalidate cache before reading to ensure fresh content
             state.invalidateFileCache(file.path);
 
-            // Small delay on mobile to ensure file system has latest content
-            if (Platform.isMobile) {
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-
             // Get fresh content
             const content = await state.getFileContent(file.path);
             const tasks: Task[] = [];
             const lines = content.split('\n');
             let lineNumber = 0;
 
-            // Define batch size - smaller on mobile for better performance
-            const BATCH_SIZE = Platform.isMobile ? 25 : 100;
+            const BATCH_SIZE = 100;
             const taskBatch: Task[] = [];
 
             while (lineNumber < lines.length) {
@@ -169,11 +162,6 @@ export class TaskParser {
                             if (taskBatch.length >= BATCH_SIZE) {
                                 tasks.push(...taskBatch);
                                 taskBatch.length = 0; // Clear the batch array
-
-                                // Add a small delay on mobile to prevent UI freezing
-                                if (Platform.isMobile) {
-                                    await new Promise(resolve => setTimeout(resolve, 5));
-                                }
                             }
                         }
 
@@ -428,13 +416,7 @@ export class TaskParser {
         let filesTouched = 0;
         let idsAdded = 0;
 
-        const MOBILE_BATCH_SIZE = 10;
-        const batchSize = Platform.isMobile ? MOBILE_BATCH_SIZE : files.length;
-
-        for (let i = 0; i < files.length; i += batchSize) {
-            const batch = files.slice(i, i + batchSize);
-
-            for (const file of batch) {
+        for (const file of files) {
                 try {
                     // vault.process may retry its callback if the file changes
                     // between read and write. Each retry generates fresh IDs, so
@@ -491,12 +473,7 @@ export class TaskParser {
                         LogUtils.debug(`Backfilled ${addedInFile} task ID(s) in ${file.path}`);
                     }
                 } catch (error) {
-                    LogUtils.error(`Failed to backfill task IDs in ${file.path}: ${error}`);
-                }
-            }
-
-            if (Platform.isMobile && i + batchSize < files.length) {
-                await new Promise(resolve => setTimeout(resolve, 10));
+                LogUtils.error(`Failed to backfill task IDs in ${file.path}: ${error}`);
             }
         }
 
@@ -513,37 +490,12 @@ export class TaskParser {
             const files = this.getFilteredFiles();
             LogUtils.debug(`Processing ${files.length} files for tasks`);
 
-            // Process files in batches on mobile for better performance
-            const MOBILE_BATCH_SIZE = 10; // Process 10 files at a time on mobile
-
-            if (Platform.isMobile) {
-                // Process files in smaller batches on mobile
-                for (let i = 0; i < files.length; i += MOBILE_BATCH_SIZE) {
-                    const fileBatch = files.slice(i, i + MOBILE_BATCH_SIZE);
-
-                    for (const file of fileBatch) {
-                        try {
-                            const fileTasks = await this.parseTasksFromFile(file);
-                            tasks.push(...fileTasks);
-                        } catch (error) {
-                            LogUtils.error(`Failed to parse tasks from file ${file.path}: ${error}`);
-                        }
-                    }
-
-                    // Add a small delay between batches on mobile to prevent UI freezing
-                    if (i + MOBILE_BATCH_SIZE < files.length) {
-                        await new Promise(resolve => setTimeout(resolve, 10));
-                    }
-                }
-            } else {
-                // Process all files at once on desktop
-                for (const file of files) {
-                    try {
-                        const fileTasks = await this.parseTasksFromFile(file);
-                        tasks.push(...fileTasks);
-                    } catch (error) {
-                        LogUtils.error(`Failed to parse tasks from file ${file.path}: ${error}`);
-                    }
+            for (const file of files) {
+                try {
+                    const fileTasks = await this.parseTasksFromFile(file);
+                    tasks.push(...fileTasks);
+                } catch (error) {
+                    LogUtils.error(`Failed to parse tasks from file ${file.path}: ${error}`);
                 }
             }
 

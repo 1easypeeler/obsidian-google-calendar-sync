@@ -10,7 +10,6 @@ import { hasTaskChanged } from '../utils/taskUtils';
 import { useStore } from '../core/store';
 import { TIMING } from '../config/constants';
 import { RepairManager } from '../repair/repairManager';
-import { Platform } from 'obsidian';
 
 interface GoogleCalendarEventInput {
     summary: string;
@@ -561,10 +560,6 @@ export class CalendarSync {
         // for every subsequent task in the batch. The cache is cleared at sync cycle boundaries
         // (start/end of processSyncQueue) instead, reducing API calls from O(n) to O(1).
 
-        // On mobile, ensure the timestamp is synchronized with additional logging
-        if (Platform.isMobile) {
-            LogUtils.debug(`Mobile: synced task ${task.id} (op:${opId}) with version ${newVersion} at ${new Date(currentTime).toISOString()}`);
-        }
     }
 
     private async checkRateLimit(): Promise<void> {

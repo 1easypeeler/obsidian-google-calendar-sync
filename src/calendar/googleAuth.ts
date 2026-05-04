@@ -1,4 +1,4 @@
-import { Notice, Platform, requestUrl, App, Plugin, ObsidianProtocolData } from 'obsidian';
+import { Notice, requestUrl, App, Plugin } from 'obsidian';
 import { loadGoogleCredentials } from '../config/config';
 import type GoogleCalendarSyncPlugin from '../core/main';
 import type { OAuth2Tokens } from '../core/types';
@@ -14,8 +14,6 @@ const DESKTOP_HOST = '127.0.0.1';
 // processes can't blindly POST to /callback and inject auth codes.
 const DESKTOP_PATH_PREFIX = '/callback';
 const DESKTOP_REDIRECT_BASE = `http://${DESKTOP_HOST}:${DESKTOP_PORT}`;
-
-const REDIRECT_URL_MOBILE = 'https://obsidian-gcal-sync-netlify-oauth.netlify.app/redirect.html';
 
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 
@@ -56,9 +54,9 @@ export class GoogleAuthManager {
         // Client ID is not secret; read it directly. Client Secret is loaded
         // lazily via getClientSecret() (decrypted from encryptedClientSecret).
         this.clientId = plugin.settings.clientId || loadGoogleCredentials().clientId;
-        // On desktop the redirect URI is regenerated per auth attempt to include
-        // a path nonce; placeholder here is overwritten in `authorize()`.
-        this.redirectUri = Platform.isMobile ? REDIRECT_URL_MOBILE : DESKTOP_REDIRECT_BASE;
+        // The redirect URI is regenerated per auth attempt to include a path
+        // nonce; placeholder here is overwritten in `authorize()`.
+        this.redirectUri = DESKTOP_REDIRECT_BASE;
     }
 
     /**
@@ -154,62 +152,53 @@ export class GoogleAuthManager {
             // Clean up any existing auth state
             await this.cleanup();
 
-            if (Platform.isMobile) {
-                await this.handleMobileAuth();
-                // Don't initialize calendar sync here - it'll be done by protocol handler
-                // after the authentication completes
-                return;
-            } else {
-                // Desktop flow:
-                // - PKCE (code_verifier + S256 challenge) protects the auth code in
-                //   transit, matching the mobile flow.
-                // - A per-flow random path nonce on the loopback redirect URI means
-                //   another local process that can hit 127.0.0.1:8085 can't blindly
-                //   inject an attacker-controlled code at /callback.
-                // - State and code_verifier live only in memory for the duration
-                //   of the flow; they are never written to data.json.
-                const state = this.generateRandomState();
-                const pathNonce = this.generateRandomState();
-                this.codeVerifier = this.generateCodeVerifier();
-                const codeChallenge = await this.generateCodeChallenge(this.codeVerifier);
-                const callbackPath = `${DESKTOP_PATH_PREFIX}/${pathNonce}`;
-                this.redirectUri = `${DESKTOP_REDIRECT_BASE}${callbackPath}`;
+            // PKCE (code_verifier + S256 challenge) protects the auth code in
+            // transit. A per-flow random path nonce on the loopback redirect URI
+            // means another local process that can hit 127.0.0.1:8085 can't
+            // blindly inject an attacker-controlled code at /callback.
+            // State and code_verifier live only in memory for the duration of
+            // the flow; they are never written to data.json.
+            const state = this.generateRandomState();
+            const pathNonce = this.generateRandomState();
+            this.codeVerifier = this.generateCodeVerifier();
+            const codeChallenge = await this.generateCodeChallenge(this.codeVerifier);
+            const callbackPath = `${DESKTOP_PATH_PREFIX}/${pathNonce}`;
+            this.redirectUri = `${DESKTOP_REDIRECT_BASE}${callbackPath}`;
 
-                const params = new URLSearchParams({
-                    client_id: this.clientId,
-                    redirect_uri: this.redirectUri,
-                    response_type: 'code',
-                    scope: 'https://www.googleapis.com/auth/calendar.events',
-                    access_type: 'offline',
-                    prompt: 'consent',
-                    state: state,
-                    code_challenge: codeChallenge,
-                    code_challenge_method: 'S256',
-                });
+            const params = new URLSearchParams({
+                client_id: this.clientId,
+                redirect_uri: this.redirectUri,
+                response_type: 'code',
+                scope: 'https://www.googleapis.com/auth/calendar.events',
+                access_type: 'offline',
+                prompt: 'consent',
+                state: state,
+                code_challenge: codeChallenge,
+                code_challenge_method: 'S256',
+            });
 
-                const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-                console.log('🔐 Auth URL generated (parameters redacted for security)');
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+            console.log('🔐 Auth URL generated (parameters redacted for security)');
 
-                try {
-                    console.log('🔐 Waiting for auth code...');
-                    const { code, returnedState } = await this.handleDesktopAuth(authUrl, callbackPath);
+            try {
+                console.log('🔐 Waiting for auth code...');
+                const { code, returnedState } = await this.handleDesktopAuth(authUrl, callbackPath);
 
-                    if (!returnedState || returnedState !== state) {
-                        throw new Error('Invalid state parameter. Authentication failed (possible CSRF attack).');
-                    }
-
-                    console.log('🔐 Exchanging auth code for tokens (PKCE)...');
-                    await this.handlePKCEAuthCode(code);
-                    console.log('🔐 Token exchange completed successfully');
-
-                    console.log('✅ Authorization successful, initializing calendar sync');
-                    this.plugin.initializeCalendarSync();
-                    new Notice('Successfully connected to Google Calendar!');
-                } catch (authError) {
-                    console.error('Error during auth process:', authError);
-                    await this.cleanup();
-                    throw authError;
+                if (!returnedState || returnedState !== state) {
+                    throw new Error('Invalid state parameter. Authentication failed (possible CSRF attack).');
                 }
+
+                console.log('🔐 Exchanging auth code for tokens (PKCE)...');
+                await this.handlePKCEAuthCode(code);
+                console.log('🔐 Token exchange completed successfully');
+
+                console.log('✅ Authorization successful, initializing calendar sync');
+                this.plugin.initializeCalendarSync();
+                new Notice('Successfully connected to Google Calendar!');
+            } catch (authError) {
+                console.error('Error during auth process:', authError);
+                await this.cleanup();
+                throw authError;
             }
         } catch (error: any) {
             console.error('Authorization failed:', error);
@@ -234,73 +223,6 @@ export class GoogleAuthManager {
 
             // Ensure cleanup after any error
             await this.cleanup();
-            throw error;
-        }
-    }
-
-    /**
-     * Handles the mobile OAuth flow using PKCE (Proof Key for Code Exchange)
-     * 
-     * The flow works as follows:
-     * 1. Generate a code verifier (random string) and code challenge (SHA-256 hash of verifier)
-     * 2. Open the Google authorization URL with the code challenge
-     * 3. User authenticates in their browser
-     * 4. Google redirects to https://obsidian.md/auth/gcalsync
-     * 5. Obsidian app intercepts this URL and triggers our protocol handler
-     * 6. We exchange the code + verifier for access and refresh tokens
-     * 
-     * This approach is more secure than the standard OAuth flow because:
-     * - The code verifier never leaves the device
-     * - Even if the authorization code is intercepted, it can't be used without the verifier
-     * - Uses a standard https URL that Obsidian can intercept
-     */
-    private async handleMobileAuth(): Promise<void> {
-        try {
-            // Set flag to indicate mobile auth is in progress
-            this.plugin.mobileAuthInitiated = true;
-
-            // Generate PKCE code verifier and challenge
-            this.codeVerifier = this.generateCodeVerifier();
-            const codeChallenge = await this.generateCodeChallenge(this.codeVerifier);
-
-            // Generate a random state value to prevent CSRF attacks
-            const state = this.generateRandomState();
-
-            // Store the state and code verifier in plugin settings for persistence across app restarts
-            this.plugin.settings.tempAuthState = state;
-            this.plugin.settings.tempCodeVerifier = this.codeVerifier;
-            await this.plugin.saveSettings();
-
-            console.log('🔐 Stored auth state and code verifier in plugin settings for persistence');
-
-            // Build authorization URL with PKCE parameters
-            const params = new URLSearchParams({
-                client_id: this.clientId,
-                redirect_uri: this.redirectUri,
-                response_type: 'code',
-                scope: 'https://www.googleapis.com/auth/calendar.events',
-                access_type: 'offline',
-                prompt: 'consent',
-                code_challenge: codeChallenge,
-                code_challenge_method: 'S256',
-                state: state
-            });
-
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-            console.log('🔐 Mobile auth URL generated (details redacted for security)');
-            console.log('🔐 Redirect URI:', this.redirectUri);
-
-            // Open the authorization URL in the browser
-            window.open(authUrl, '_blank');
-
-            new Notice('Please complete authentication in your browser and return to Obsidian when finished.');
-
-            // When Google redirects to the redirect URI, the page will send the user back to Obsidian
-            // which will trigger our protocol handler with the auth code
-
-        } catch (error) {
-            console.error('Mobile auth error:', error);
-            this.plugin.mobileAuthInitiated = false;
             throw error;
         }
     }
@@ -357,12 +279,10 @@ export class GoogleAuthManager {
             };
 
             await this.saveTokens(tokens);
-            this.plugin.mobileAuthInitiated = false;
             console.log('✅ Successfully exchanged code for tokens using PKCE flow');
 
         } catch (error) {
             console.error('❌ PKCE token exchange failed:', error instanceof Error ? error.message : 'Unknown error');
-            this.plugin.mobileAuthInitiated = false;
             throw error;
         }
     }
@@ -792,68 +712,50 @@ export class GoogleAuthManager {
         console.log('🧹 Starting cleanup process');
 
         try {
-            // Reset mobile auth state if needed
-            if (Platform.isMobile && this.plugin.mobileAuthInitiated) {
-                this.plugin.mobileAuthInitiated = false;
-                this.codeVerifier = null;
+            const net = require('net');
 
-                // Clear any stored auth state from settings
-                if (this.plugin.settings.tempAuthState || this.plugin.settings.tempCodeVerifier) {
-                    console.log('🧹 Cleaning up mobile auth state from settings');
-                    this.plugin.settings.tempAuthState = undefined;
-                    this.plugin.settings.tempCodeVerifier = undefined;
-                    await this.plugin.saveSettings();
-                }
-            }
+            // Try more aggressive socket connection to force close the port
+            console.log('Attempting to connect to port to force it closed');
+            const client = new net.Socket();
 
-            // On desktop platforms, we can use Node's net module for server cleanup
-            if (!Platform.isMobile) {
-                const net = require('net');
+            // Set a very short timeout for the connection
+            client.setTimeout(1000);
 
-                // Try more aggressive socket connection to force close the port
-                console.log('Attempting to connect to port to force it closed');
-                const client = new net.Socket();
-
-                // Set a very short timeout for the connection
-                client.setTimeout(1000);
-
-                await new Promise<void>((resolve) => {
-                    client.once('error', (err: NodeJS.ErrnoException) => {
-                        console.log(`Socket connection error (expected if port not in use): ${err.code}`);
-                        resolve();
-                    });
-
-                    client.once('timeout', () => {
-                        console.log('Socket connection timeout');
-                        client.destroy();
-                        resolve();
-                    });
-
-                    client.once('connect', () => {
-                        console.log('Successfully connected to server, sending FIN packet');
-                        // Send RST packet to forcibly close the connection
-                        client.destroy();
-                        resolve();
-                    });
-
-                    try {
-                        client.connect(DESKTOP_PORT, DESKTOP_HOST);
-                    } catch (e) {
-                        console.log('Error during connect attempt:', e);
-                        resolve();
-                    }
+            await new Promise<void>((resolve) => {
+                client.once('error', (err: NodeJS.ErrnoException) => {
+                    console.log(`Socket connection error (expected if port not in use): ${err.code}`);
+                    resolve();
                 });
 
-                // Close any existing auth windows
+                client.once('timeout', () => {
+                    console.log('Socket connection timeout');
+                    client.destroy();
+                    resolve();
+                });
+
+                client.once('connect', () => {
+                    console.log('Successfully connected to server, sending FIN packet');
+                    client.destroy();
+                    resolve();
+                });
+
                 try {
-                    const existingWindow = window.open('', 'googleAuth');
-                    if (existingWindow) {
-                        console.log('Found existing auth window, closing it');
-                        existingWindow.close();
-                    }
+                    client.connect(DESKTOP_PORT, DESKTOP_HOST);
                 } catch (e) {
-                    console.log('Error closing existing auth window:', e);
+                    console.log('Error during connect attempt:', e);
+                    resolve();
                 }
+            });
+
+            // Close any existing auth windows
+            try {
+                const existingWindow = window.open('', 'googleAuth');
+                if (existingWindow) {
+                    console.log('Found existing auth window, closing it');
+                    existingWindow.close();
+                }
+            } catch (e) {
+                console.log('Error closing existing auth window:', e);
             }
 
         } catch (e) {
@@ -916,41 +818,4 @@ export class GoogleAuthManager {
         return this.base64UrlEncode(array);
     }
 
-    // This method should be called by the plugin when it receives a protocol callback
-    public async handleProtocolCallback(params: Record<string, string>): Promise<void> {
-        console.log('🔐 Received protocol callback (params redacted):', LogUtils.redact(params));
-
-        try {
-            const savedState = this.plugin.settings.tempAuthState;
-
-            if (!savedState || savedState !== params.state) {
-                throw new Error('Invalid state parameter. Authentication failed.');
-            }
-
-            const storedVerifier = this.plugin.settings.tempCodeVerifier;
-
-            if (!storedVerifier) {
-                throw new Error('Code verifier not found. Please restart the authentication process.');
-            }
-            this.codeVerifier = storedVerifier;
-
-            if (params.code) {
-                await this.handlePKCEAuthCode(params.code);
-
-                // Clean up settings after successful auth
-                this.plugin.settings.tempAuthState = undefined;
-                this.plugin.settings.tempCodeVerifier = undefined;
-                await this.plugin.saveSettings();
-            } else if (params.error) {
-                throw new Error(`Authentication error: ${params.error}`);
-            } else {
-                throw new Error('No authorization code received');
-            }
-        } catch (error) {
-            console.error('Protocol callback error:', error);
-            this.plugin.mobileAuthInitiated = false;
-            new Notice(`Authentication failed: ${error.message}`);
-            throw error;
-        }
-    }
 }

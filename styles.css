@@ -59,18 +59,6 @@
     color: var(--text-muted);
 }
 
-/* Enhanced disconnected state visual cue for mobile */
-body.is-mobile .ribbon-icon.calendar-clock.is-disconnected {
-    opacity: 0.8;
-    color: var(--text-error-hover);
-    border: 1px dotted var(--text-error);
-    border-radius: 4px;
-}
-
-/* Enhanced error state visual cue for mobile */
-body.is-mobile .ribbon-icon.calendar-clock.is-error {
-    animation: pulse 2s infinite;
-}
 
 @keyframes spin {
     from {

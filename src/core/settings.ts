@@ -27,8 +27,6 @@ export const DEFAULT_SETTINGS: GoogleCalendarSettings = {
     taskIds: {},
     verboseLogging: false,
     hasCompletedOnboarding: true,  // Set to true to prevent welcome modal on startup
-    mobileSyncLimit: 100,  // Default to 100 files on mobile
-    mobileOptimizations: true,  // Enable mobile optimizations by default
 };
 
 export class GoogleCalendarSettingsTab extends PluginSettingTab {
@@ -154,33 +152,6 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        // Mobile Settings Section
-        containerEl.createEl('h3', { text: 'Mobile Optimizations' });
-
-        new Setting(containerEl)
-            .setName('Enable Mobile Optimizations')
-            .setDesc('Apply mobile-specific optimizations for better performance on mobile devices')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.mobileOptimizations ?? true)
-                .onChange(async (value) => {
-                    this.plugin.settings.mobileOptimizations = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Mobile Sync File Limit')
-            .setDesc('Maximum number of files to scan for tasks on mobile devices (lower values improve performance)')
-            .addText(text => text
-                .setPlaceholder('100')
-                .setValue((this.plugin.settings.mobileSyncLimit ?? 100).toString())
-                .onChange(async (value) => {
-                    const limit = parseInt(value);
-                    if (!isNaN(limit) && limit > 0) {
-                        this.plugin.settings.mobileSyncLimit = limit;
-                        await this.plugin.saveSettings();
-                    }
-                }));
-
         // OAuth Credentials Section
         containerEl.createEl('h3', { text: 'Google OAuth Credentials' });
 
@@ -221,7 +192,7 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
             .setName('Client Secret')
             .setDesc(hasSavedSecret
                 ? 'A Client Secret is saved. Leave blank to keep the existing value.'
-                : 'Your Google OAuth Client Secret. Stored encrypted via the OS keychain on desktop.')
+                : 'Your Google OAuth Client Secret. Stored encrypted via the OS keychain.')
             .addText(text => {
                 text.setPlaceholder(hasSavedSecret ? '••••••••••••' : 'GOCSPX-xxxxxx')
                     .setValue('')

@@ -28,7 +28,6 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
     private unsubscribeStore: (() => void) | undefined = undefined;
     private lastContent: string[] = [];
     private cleanupInterval: number | null = null;
-    public mobileAuthInitiated: boolean = false;
 
     async onload() {
         try {
@@ -64,59 +63,6 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             // Make sure any previous protocol handlers are cleaned up first
             // Don't await - let cleanup happen in background to avoid blocking startup
             this.authManager.cleanup();
-
-            // Register protocol handler for mobile OAuth
-            this.registerObsidianProtocolHandler('auth/gcalsync', async (params) => {
-                if (this.authManager) {
-                    try {
-                        console.log('Received protocol callback (parameters redacted for security)');
-
-                        if (!params.code) {
-                            throw new Error('Missing authorization code in callback parameters');
-                        }
-
-                        await this.authManager.handleProtocolCallback(params);
-
-                        // Successfully authenticated, show success message
-                        console.log('🔐 Successfully completed authentication via protocol handler');
-                        new Notice('Successfully connected to Google Calendar!');
-
-                        // Set authentication state before initializing calendar sync
-                        useStore.getState().setAuthenticated(true);
-
-                        // Also update the UI status immediately to reflect authenticated state
-                        useStore.getState().setStatus('connected');
-                        this.updateRibbonStatus('connected');
-
-                        // Initialize calendar sync after authentication is complete
-                        await this.initializeCalendarSync();
-                    } catch (error) {
-                        console.error('Error handling protocol callback:', error);
-
-                        // Provide more specific error messages based on error type
-                        let errorMessage = 'Authentication failed. Please try connecting again.';
-
-                        if (error instanceof Error) {
-                            if (error.message.includes('network')) {
-                                errorMessage = 'Network error during authentication. Check your internet connection and try again.';
-                            } else if (error.message.includes('invalid_grant')) {
-                                errorMessage = 'Invalid authorization. Please try authenticating again.';
-                            } else if (error.message.includes('access_denied')) {
-                                errorMessage = 'Access was denied. Please grant all required permissions when authenticating.';
-                            } else if (error.message.includes('Missing authorization code')) {
-                                errorMessage = 'Missing authorization data. Please complete the full authentication process.';
-                            }
-                        }
-
-                        // Show a specific error notice that gives clearer instruction
-                        new Notice(errorMessage, 10000); // Show for 10 seconds for better visibility
-
-                        // Update UI state
-                        useStore.getState().setAuthenticated(false);
-                        useStore.getState().setStatus('error', error instanceof Error ? error : new Error(String(error)));
-                    }
-                }
-            });
 
             try {
                 await this.authManager.loadSavedTokens();
