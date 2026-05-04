@@ -438,9 +438,9 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
 
     private startPeriodicCleanup() {
         // Run cleanup every 5 minutes
-        this.cleanupInterval = window.setInterval(() => {
+        this.cleanupInterval = this.registerInterval(window.setInterval(() => {
             useStore.getState().clearStaleProcessingTasks();
-        }, TIMING.PERIODIC_CLEANUP_INTERVAL_MS);
+        }, TIMING.PERIODIC_CLEANUP_INTERVAL_MS));
     }
 
     private async getAllTasks(): Promise<Task[]> {

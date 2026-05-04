@@ -460,7 +460,7 @@ export class GoogleAuthManager {
                 }, 300000);
 
                 // Add event listener to cleanup when Obsidian closes
-                window.addEventListener('beforeunload', () => {
+                this.plugin.registerDomEvent(window, 'beforeunload', () => {
                     if (!authCancelled) {
                         authCancelled = true;
                         cleanup(windowCheckInterval);
@@ -472,7 +472,7 @@ export class GoogleAuthManager {
                             // Ignore errors during shutdown
                         }
                     }
-                }, { once: true });
+                });
 
             } catch (error) {
                 console.error('Error in handleDesktopAuth:', error);

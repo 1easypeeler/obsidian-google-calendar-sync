@@ -84,7 +84,7 @@ export class GoogleCalendarSettingsTab extends PluginSettingTab {
                     .setValue(pending)
                     .onChange(value => { pending = value.trim(); });
 
-                text.inputEl.addEventListener('blur', async () => {
+                this.plugin.registerDomEvent(text.inputEl, 'blur', async () => {
                     if (pending.length === 0) {
                         this.plugin.settings.calendarId = 'primary';
                         text.setValue('primary');
