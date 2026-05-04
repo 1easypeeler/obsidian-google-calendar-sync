@@ -1,5 +1,5 @@
 {
-    "id": "obsidian-gcal-sync",
+    "id": "google-calendar-sync",
     "name": "Google Calendar Sync",
     "version": "0.2.1",
     "minAppVersion": "1.4.0",
