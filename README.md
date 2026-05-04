@@ -33,8 +33,8 @@ The plugin tracks tasks using HTML comments embedded at the end of each task lin
 
 ## Installation
 
-1. Download `google-calendar-sync.zip` from the [latest release](https://github.com/1easypeeler/obsidian-google-calendar-sync/releases/latest)
-2. Extract the zip into `<vault>/.obsidian/plugins/` — this creates the `google-calendar-sync` folder with all required files
+1. Download `obsidian-google-calendar-sync-v<version>.zip` from the [latest release](https://github.com/1easypeeler/obsidian-google-calendar-sync/releases/latest)
+2. Extract the zip into `<vault>/.obsidian/plugins/` and rename the extracted folder to `google-calendar-sync` (it must match the plugin id in `manifest.json`)
 3. Restart Obsidian and enable the plugin under Settings → Community Plugins
 
 ---
