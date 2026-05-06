@@ -166,7 +166,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             this.app.vault.on('modify',
                 debounce(async (file: TFile) => {
                     if (!useStore.getState().isSyncAllowed()) return;
-                    if (!file.path.endsWith('.md')) return;
+                    if (!this.isTaskFile(file)) return;
 
                     try {
                         const state = useStore.getState();
