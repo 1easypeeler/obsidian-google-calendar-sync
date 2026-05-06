@@ -142,7 +142,9 @@ export class RepairManager {
             // Enhanced Sync phase - more robust rebuilding of events
             if (tasks.size > 0) {
                 const store = useStore.getState();
-                store.startSync();
+                // NOTE: Do NOT call startSync() here — it sets syncInProgress = true,
+                // which causes processSyncQueue() to bail thinking another sync is running.
+                // processSyncQueue manages its own lifecycle.
                 store.enableTempSync();
 
                 try {
@@ -314,7 +316,6 @@ export class RepairManager {
                     });
                 } finally {
                     store.disableTempSync();
-                    store.endSync(errors.size === 0);
                 }
             } else {
                 LogUtils.debug('No tasks found to repair. This is unusual - check if tasks have IDs.');

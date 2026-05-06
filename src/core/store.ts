@@ -687,6 +687,14 @@ export const store = createStore<TaskStore>()(
                     // Clear any sync queue checkers
                     state.clearSyncQueueCheckers();
 
+                    // Safety: if a caller (syncAllTasks, repairManager) set
+                    // syncInProgress for its outer operation but the queue isn't
+                    // actively being processed, reset the flag so processSyncQueue
+                    // can run instead of bailing with "already in progress".
+                    if (state.syncInProgress && !state.processingBatch) {
+                        set(state => { state.syncInProgress = false; });
+                    }
+
                     // Process the queue immediately
                     await state.processSyncQueue();
 

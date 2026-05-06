@@ -13,6 +13,7 @@ import { MetadataManager } from '../metadata/metadataManager';
 import { TokenController } from '../tasks/TokenController';
 import { LogUtils } from '../utils/logUtils';
 import { hasTaskChanged } from '../utils/taskUtils';
+import { IdUtils } from '../utils/idUtils';
 import { initializeStore } from './store';
 
 export default class GoogleCalendarSyncPlugin extends Plugin {
@@ -168,12 +169,67 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                     if (!file.path.endsWith('.md')) return;
 
                     try {
-                        // Get the file content
                         const state = useStore.getState();
                         state.invalidateFileCache(file.path);
-                        const content = await state.getFileContent(file.path);
 
-                        // Find all task lines in the file
+                        // ── Inline backfill: tag any dated-but-unIDed tasks ──
+                        // When a task is edited via the Tasks plugin modal from a
+                        // Dataview view, the source file may not be open in any
+                        // editor — so the ViewPlugin never runs and the task never
+                        // gets an ID.  Tag them here so the enqueue below can
+                        // pick them up.
+                        const taskPattern = /^\s*- \[[ xX]\] /;
+                        const datePattern = /📅\s*(\d{4}-\d{2}-\d{2})/;
+                        const idPattern = /<!-- task-id: [a-z0-9]+ -->/;
+
+                        let idsAdded = 0;
+                        await this.app.vault.process(file, (content) => {
+                            const lines = content.split('\n');
+                            let modified = false;
+
+                            for (let i = 0; i < lines.length; i++) {
+                                const line = lines[i];
+                                // Indented continuation lines — skip
+                                if (/^\s{4,}/.test(line) && !taskPattern.test(line)) continue;
+                                if (!taskPattern.test(line)) continue;
+                                if (idPattern.test(line)) continue;
+                                if (!datePattern.test(line)) continue;
+
+                                const newId = IdUtils.generateTimeBasedId();
+                                const trimmedRight = line.replace(/\s+$/, '');
+                                lines[i] = `${trimmedRight} <!-- task-id: ${newId} -->`;
+
+                                const dateMatch = line.match(datePattern);
+                                const now = Date.now();
+                                this.settings.taskMetadata[newId] = {
+                                    filePath: file.path,
+                                    eventId: '',
+                                    title: line.replace(/^\s*- \[[ xX]\] /, '').trim(),
+                                    date: dateMatch?.[1] || '',
+                                    completed: /^\s*- \[[xX]\]/.test(line),
+                                    createdAt: now,
+                                    lastModified: now,
+                                    lastSynced: 0,
+                                };
+
+                                idsAdded++;
+                                modified = true;
+                            }
+
+                            return modified ? lines.join('\n') : content;
+                        });
+
+                        if (idsAdded > 0) {
+                            await this.saveSettings();
+                            LogUtils.debug(`Tagged ${idsAdded} new task(s) in ${file.path} via file handler`);
+                            // vault.process triggers another modify event;
+                            // the debounce will re-enter this handler with
+                            // all tasks now carrying IDs — exit here.
+                            return;
+                        }
+
+                        // ── Normal flow: parse & enqueue ──
+                        const content = await state.getFileContent(file.path);
                         const lines = content.split('\n');
                         const taskLines = lines.filter(line => this.taskParser.isTaskLine(line));
 
@@ -200,7 +256,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                             const metadata = state.plugin.settings.taskMetadata?.[task.id];
                             if (metadata?.justSynced && metadata.syncTimestamp) {
                                 const syncAge = Date.now() - metadata.syncTimestamp;
-                                if (syncAge < TIMING.JUST_SYNCED_WINDOW_MS) { // Use a longer window (2 seconds)
+                                if (syncAge < TIMING.JUST_SYNCED_WINDOW_MS) {
                                     LogUtils.debug(`Task ${task.id} was just synced ${syncAge}ms ago, skipping (file handler)`);
                                     continue;
                                 }
@@ -212,14 +268,18 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                             }
                         }
 
-                        // Enqueue all tasks at once
+                        // Enqueue all tasks and process immediately.
+                        // Without processSyncQueueNow, we'd rely on the timeout
+                        // that enqueueTasks schedules — but that timeout can be
+                        // cleared if the user triggers a manual sync first.
                         if (tasksToQueue.length > 0) {
                             await state.enqueueTasks(tasksToQueue);
+                            await state.processSyncQueueNow();
                         }
                     } catch (error) {
                         LogUtils.error(`Failed to process file changes for ${file.path}:`, error);
                     }
-                }, TIMING.FILE_CHANGE_DEBOUNCE_MS) // Reduced to 1 second for more responsive sync
+                }, TIMING.FILE_CHANGE_DEBOUNCE_MS)
             )
         );
 
@@ -239,15 +299,12 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                             const state = useStore.getState();
                             try {
                                 state.enableTempSync();
-                                state.startSync();
                                 const tasks = await this.taskParser.parseTasksFromFile(file);
                                 await state.enqueueTasks(tasks.filter(t => t?.id));
                                 await state.processSyncQueueNow();
-                                state.endSync(true);
                                 new Notice('Tasks synced with Google Calendar');
                             } catch (error) {
                                 LogUtils.error(`Failed to sync tasks from ${file.path}:`, error);
-                                state.endSync(false);
                                 new Notice('Failed to sync tasks with Google Calendar');
                             } finally {
                                 state.disableTempSync();
@@ -257,14 +314,18 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             })
         );
 
-        // Register editor change events for auto-sync with improved batching
+        // Register editor change events for auto-sync with improved batching.
+        // The second argument to editor-change is the MarkdownView that owns the
+        // editor — use it instead of getActiveViewOfType so we process the file
+        // that actually changed, not the focused pane (which may be a Dataview
+        // dashboard or a different split).
         this.registerEvent(
             this.app.workspace.on('editor-change',
-                debounce(async (editor: Editor) => {
+                debounce(async (editor: Editor, info: MarkdownView) => {
                     if (!useStore.getState().isSyncAllowed()) return;
 
-                    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-                    if (!view || !view.file) return;
+                    const changedFile = info?.file;
+                    if (!changedFile) return;
 
                     // Check if the cursor is on a task line
                     const cursorPos = editor.getCursor();
@@ -279,17 +340,13 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                     if (state.syncInProgress) {
                         LogUtils.debug('Sync in progress, will retry after current sync');
                         setTimeout(() => {
-                            if (view.file) {
-                                this.processEditorChanges(view.file);
-                            }
-                        }, 500); // Reduced retry time to 500ms
+                            this.processEditorChanges(changedFile);
+                        }, 500);
                         return;
                     }
 
-                    if (view.file) {
-                        await this.processEditorChanges(view.file);
-                    }
-                }, TIMING.EDITOR_CHANGE_DEBOUNCE_MS) // Reduced to 500ms for more responsive sync
+                    await this.processEditorChanges(changedFile);
+                }, TIMING.EDITOR_CHANGE_DEBOUNCE_MS)
             )
         );
     }
@@ -714,7 +771,10 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
         }
 
         try {
-            state.startSync();
+            // NOTE: Do NOT call startSync() here — it sets syncInProgress = true,
+            // which causes processSyncQueue() to bail immediately thinking another
+            // sync is already running.  processSyncQueue manages its own lifecycle
+            // (sets syncInProgress while it processes, resets in finally).
             state.enableTempSync();
 
             // Backfill IDs into pre-existing un-tagged tasks before parsing,
@@ -757,12 +817,10 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             await state.processSyncQueueNow();
 
             await this.saveSettings();
-            state.endSync(true);
             new Notice('Tasks synced with Google Calendar');
             LogUtils.debug('Full sync completed');
         } catch (error) {
-            console.error('❌ Sync failed:', error);
-            state.endSync(false);
+            LogUtils.error('Sync failed:', error);
             state.setStatus('error', error instanceof Error ? error : new Error(String(error)));
             new Notice('Sync failed. Please try again.');
         } finally {
