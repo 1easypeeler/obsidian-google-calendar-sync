@@ -325,7 +325,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                     if (!useStore.getState().isSyncAllowed()) return;
 
                     const changedFile = info?.file;
-                    if (!changedFile) return;
+                    if (!changedFile || !this.isTaskFile(changedFile)) return;
 
                     // Check if the cursor is on a task line
                     const cursorPos = editor.getCursor();
@@ -858,7 +858,7 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
         }
     }
 
-    private isTaskFile(file: TAbstractFile): boolean {
+    public isTaskFile(file: TAbstractFile): boolean {
         // First check if it's a markdown file
         if (!(file instanceof TFile) || !file.extension.toLowerCase().endsWith('md')) {
             return false;

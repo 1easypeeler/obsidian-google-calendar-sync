@@ -1,7 +1,7 @@
 {
     "id": "google-calendar-sync",
     "name": "Google Calendar Sync",
-    "version": "0.2.7",
+    "version": "0.2.8",
     "minAppVersion": "1.4.0",
     "description": "Sync Obsidian tasks with Google Calendar.",
     "author": "Alfie Sylvest",

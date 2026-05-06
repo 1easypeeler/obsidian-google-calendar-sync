@@ -1,6 +1,6 @@
 import { Extension, StateField, StateEffect, RangeSet, RangeSetBuilder, EditorState, Transaction } from "@codemirror/state"
 import { EditorView, Decoration, DecorationSet, WidgetType, ViewPlugin, ViewUpdate } from "@codemirror/view"
-import { TFile, Editor, Platform } from "obsidian"
+import { TFile, Editor, MarkdownView, Platform, editorInfoField } from "obsidian"
 import type GoogleCalendarSyncPlugin from '../core/main'
 import { LogUtils } from '../utils/logUtils'
 import { ErrorUtils } from '../utils/errorUtils'
@@ -56,9 +56,11 @@ export class TokenController {
     }
 
     private registerEditorHandlers() {
-        // Track edits and ensure IDs stay at end of lines
+        // Track edits and ensure IDs stay at end of lines.
+        // Only process files that match the Folders to Sync setting.
         this.plugin.registerEvent(
-            this.plugin.app.workspace.on('editor-change', debounce((editor: Editor) => {
+            this.plugin.app.workspace.on('editor-change', debounce((editor: Editor, info: MarkdownView) => {
+                if (info?.file && !this.plugin.isTaskFile(info.file)) return
                 this.lastEditTime = Date.now()
                 this.ensureIdsAtEndOfLines(editor)
                 this.checkForNewTasks(editor)
@@ -404,6 +406,10 @@ export class TokenController {
             update(update: ViewUpdate) {
                 if (!update.docChanged) return;
 
+                // Only process files in configured sync folders
+                const info = update.state.field(editorInfoField, false);
+                if (info?.file && !plugin.isTaskFile(info.file)) return;
+
                 const currentTime = Date.now();
                 if (currentTime - this.lastChangeTime < 100) return; // Debounce rapid changes
                 this.lastChangeTime = currentTime;
@@ -437,6 +443,10 @@ export class TokenController {
 
             update(update: ViewUpdate) {
                 if (!update.docChanged) return;
+
+                // Only process files in configured sync folders
+                const info = update.state.field(editorInfoField, false);
+                if (info?.file && !plugin.isTaskFile(info.file)) return;
 
                 const currentTime = Date.now();
                 if (currentTime - this.lastChangeTime < 100) return; // Debounce rapid changes
