@@ -4,6 +4,7 @@ import { TFile, Editor, MarkdownView, Platform, editorInfoField } from "obsidian
 import type GoogleCalendarSyncPlugin from '../core/main'
 import { LogUtils } from '../utils/logUtils'
 import { ErrorUtils } from '../utils/errorUtils'
+import { IdUtils } from '../utils/idUtils'
 import debounce from 'just-debounce-it'
 
 
@@ -56,13 +57,14 @@ export class TokenController {
     }
 
     private registerEditorHandlers() {
-        // Track edits and ensure IDs stay at end of lines.
+        // Track edits and keep task IDs in the correct position
+        // (immediately before the trailing Tasks-plugin metadata block).
         // Only process files that match the Folders to Sync setting.
         this.plugin.registerEvent(
             this.plugin.app.workspace.on('editor-change', debounce((editor: Editor, info: MarkdownView) => {
                 if (info?.file && !this.plugin.isTaskFile(info.file)) return
                 this.lastEditTime = Date.now()
-                this.ensureIdsAtEndOfLines(editor)
+                this.ensureIdsInCorrectPosition(editor)
                 this.checkForNewTasks(editor)
                 this.handleTaskCompletionChanges(editor)
             }, 1000))
@@ -162,8 +164,9 @@ export class TokenController {
                     // Clean up any extra whitespace
                     newLine = newLine.replace(/\s+/g, ' ').trim()
 
-                    // Ensure ID is at the end and reminder is at the beginning after checkbox
-                    // Remove the ID and reminder first
+                    // Reposition the ID (before any trailing Tasks-plugin tokens)
+                    // and move the reminder to right after the checkbox. Strip both
+                    // first so re-insertion lands them in canonical positions.
                     if (taskId) {
                         newLine = newLine.replace(this.ID_PATTERN, '')
                     }
@@ -180,9 +183,9 @@ export class TokenController {
                             newLine = newLine.replace(checkboxMatch[0], checkboxMatch[0] + `${reminderText} `)
                         }
 
-                        // Add ID at the end
+                        // Re-insert ID before any trailing Tasks-plugin tokens
                         if (taskId) {
-                            newLine = newLine + ` <!-- task-id: ${taskId} -->`
+                            newLine = IdUtils.insertTaskIdComment(newLine, `<!-- task-id: ${taskId} -->`)
                         }
                     }
 
@@ -225,7 +228,7 @@ export class TokenController {
         }
     }
 
-    private ensureIdsAtEndOfLines(editor: Editor) {
+    private ensureIdsInCorrectPosition(editor: Editor) {
         // @ts-ignore - cm exists on editor but is not typed
         const view = editor.cm as EditorView
         if (!view) return
@@ -255,7 +258,7 @@ export class TokenController {
                         changes.push({
                             from: prevLine.from,
                             to: prevLine.to,
-                            insert: prevLine.text.trim() + ' ' + taskId
+                            insert: IdUtils.insertTaskIdComment(prevLine.text.trim(), taskId)
                         })
                         
                         // Remove the ID from current line
@@ -283,39 +286,23 @@ export class TokenController {
                 let needsUpdate = false
                 let newLine = line.text
 
-                // Handle IDs first - ensure they're at the end
+                // Handle IDs first - ensure they're in the correct position
+                // (immediately before the trailing Tasks-plugin token block).
                 if (taskIdMatches.length > 0) {
-                    // Check if there are multiple IDs (the issue)
                     if (taskIdMatches.length > 1) {
                         LogUtils.debug(`Found multiple task IDs in line: ${line.text}`)
 
                         // Keep only the first ID
                         const firstId = taskIdMatches[0][0]
-                        // Remove all IDs from the line
-                        newLine = newLine.replace(this.ID_PATTERN, '')
-                        // Clean up any extra whitespace
-                        newLine = newLine.replace(/\s+/g, ' ').trim()
-
-                        // Add the ID at the end of the line
-                        newLine = newLine + ' ' + firstId
+                        // Strip every ID instance, then reinsert the first at the
+                        // correct position.
+                        const stripped = newLine.replace(this.ID_PATTERN, '').replace(/\s+/g, ' ').trim()
+                        newLine = IdUtils.insertTaskIdComment(stripped, firstId)
                         needsUpdate = true
-                    }
-                    // If ID exists but is not at the end of the line
-                    else {
-                        const idMatch = taskIdMatches[0]
-                        const idText = idMatch[0]
-                        
-                        // Check if ID is already at the end (with optional whitespace)
-                        const isAtEnd = newLine.trim().endsWith(idText.trim())
-                        
-                        if (!isAtEnd) {
-                            // Remove the ID from its current position
-                            newLine = newLine.replace(idText, '')
-                            // Clean up any extra whitespace
-                            newLine = newLine.replace(/\s+/g, ' ').trim()
-
-                            // Add the ID at the end of the line
-                            newLine = newLine + ' ' + idText
+                    } else {
+                        const repositioned = IdUtils.repositionTaskIdComment(newLine)
+                        if (repositioned !== newLine) {
+                            newLine = repositioned
                             needsUpdate = true
                         }
                     }
@@ -363,10 +350,9 @@ export class TokenController {
                         // Remove the ID temporarily
                         newLine = newLine.replace(this.ID_PATTERN, '').trim()
 
-                        // Add the ID back at the end
+                        // Re-insert the ID at the correct position
                         if (taskId) {
-                            const taskIdText = `<!-- task-id: ${taskId} -->`
-                            newLine = newLine + ' ' + taskIdText
+                            newLine = IdUtils.insertTaskIdComment(newLine, `<!-- task-id: ${taskId} -->`)
                         }
 
                         LogUtils.debug(`Cleaning up completion markers in unticked task during ID check: ${taskId}`)
@@ -509,8 +495,8 @@ export class TokenController {
                                     cleanedLine = cleanedLine.replace(checkboxMatch[0], checkboxMatch[0] + reminderText + ' ');
                                 }
 
-                                // Add ID at the end
-                                cleanedLine = cleanedLine + ' ' + taskIdMatch[0];
+                                // Re-insert ID before any trailing Tasks-plugin tokens
+                                cleanedLine = IdUtils.insertTaskIdComment(cleanedLine, taskIdMatch[0]);
                             }
 
                             LogUtils.debug(`Original line: ${newLineText}`);
@@ -706,7 +692,7 @@ export class TokenController {
                         }
 
                         // For line breaks within task content, let CodeMirror handle naturally
-                        // We'll fix the ID position in a post-processing step via the ensureIdsAtEndOfLines method
+                        // We'll fix the ID position in a post-processing step via the ensureIdsInCorrectPosition method
                         // This prevents the character duplication bug caused by conflicting transaction handling
 
                         // Always allow the line break to proceed naturally
@@ -803,10 +789,6 @@ export class TokenController {
     // Private implementation of generateTaskId
     private _generateTaskId(view: EditorView, pos: number): string {
         try {
-            // Import the IdUtils class we created for mobile compatibility
-            // Using delayed import to avoid potential issues on load
-            const { IdUtils } = require('../utils/idUtils');
-
             // Generate a time-based ID for better uniqueness
             const id = IdUtils.generateTimeBasedId();
             const now = Date.now();
@@ -832,24 +814,18 @@ export class TokenController {
                 return '';
             }
 
-            // Create the task ID
+            // Create the task ID and place it just before any trailing
+            // Tasks-plugin metadata tokens so date/done emojis stay parseable.
             const taskId = `<!-- task-id: ${id} -->`;
+            const newLineText = IdUtils.insertTaskIdComment(line.text, taskId);
 
-            // Insert the ID at the end of the line
-            // This helps with tag parsing and general readability
-            let transaction;
-
-            // Find the end of the line
-            const insertPos = line.to;
-
-            // Insert the ID at the end of the task line
             const changes = [{
-                from: insertPos,
-                to: insertPos,
-                insert: ` ${taskId}`
+                from: line.from,
+                to: line.to,
+                insert: newLineText,
             }];
 
-            transaction = view.state.update({ changes });
+            const transaction = view.state.update({ changes });
             view.dispatch(transaction);
 
             // Store metadata about this task

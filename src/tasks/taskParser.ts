@@ -394,7 +394,7 @@ export class TaskParser {
      * Uses vault.process for atomic read-modify-write that's safe against
      * concurrent edits in the active editor.
      */
-    public async backfillTaskIds(): Promise<{ filesTouched: number; idsAdded: number }> {
+    public async backfillTaskIds(): Promise<{ filesTouched: number; idsAdded: number; idsRepositioned: number }> {
         const taskLinePattern = /^\s*- \[[ xX]\] /;
         const idPattern = this.ID_PATTERN;
         const datePattern = this.DATE_PATTERN;
@@ -403,6 +403,7 @@ export class TaskParser {
         const files = this.getFilteredFiles();
         let filesTouched = 0;
         let idsAdded = 0;
+        let idsRepositioned = 0;
 
         for (const file of files) {
                 try {
@@ -413,10 +414,12 @@ export class TaskParser {
                     // after vault.process resolves successfully.
                     let pendingMetadata: Record<string, TaskMetadata> = {};
                     let addedInFile = 0;
+                    let repositionedInFile = 0;
 
                     await this.plugin.app.vault.process(file, (content) => {
                         pendingMetadata = {};
                         addedInFile = 0;
+                        repositionedInFile = 0;
 
                         const lines = content.split('\n');
                         let modified = false;
@@ -426,13 +429,24 @@ export class TaskParser {
 
                             if (indentedPattern.test(line)) continue;
                             if (!taskLinePattern.test(line)) continue;
-                            if (idPattern.test(line)) continue;
+
+                            if (idPattern.test(line)) {
+                                // Legacy tasks may have the comment trailing the
+                                // metadata block, which breaks Tasks-plugin date
+                                // parsing. Reposition without generating a new ID.
+                                const repositioned = IdUtils.repositionTaskIdComment(line);
+                                if (repositioned !== line) {
+                                    lines[j] = repositioned;
+                                    modified = true;
+                                    repositionedInFile++;
+                                }
+                                continue;
+                            }
                             // Only tag tasks that will actually sync (have a 📅 date)
                             if (!datePattern.test(line)) continue;
 
                             const newId = IdUtils.generateTimeBasedId();
-                            const trimmedRight = line.replace(/\s+$/, '');
-                            lines[j] = `${trimmedRight} <!-- task-id: ${newId} -->`;
+                            lines[j] = IdUtils.insertTaskIdComment(line, `<!-- task-id: ${newId} -->`);
 
                             const dateMatch = line.match(datePattern);
                             const now = Date.now();
@@ -454,11 +468,14 @@ export class TaskParser {
                         return modified ? lines.join('\n') : content;
                     });
 
-                    if (addedInFile > 0) {
-                        Object.assign(this.plugin.settings.taskMetadata, pendingMetadata);
+                    if (addedInFile > 0 || repositionedInFile > 0) {
+                        if (addedInFile > 0) {
+                            Object.assign(this.plugin.settings.taskMetadata, pendingMetadata);
+                        }
                         filesTouched++;
                         idsAdded += addedInFile;
-                        LogUtils.debug(`Backfilled ${addedInFile} task ID(s) in ${file.path}`);
+                        idsRepositioned += repositionedInFile;
+                        LogUtils.debug(`Backfill in ${file.path}: ${addedInFile} added, ${repositionedInFile} repositioned`);
                     }
                 } catch (error) {
                 LogUtils.error(`Failed to backfill task IDs in ${file.path}: ${error}`);
@@ -469,7 +486,7 @@ export class TaskParser {
             await this.plugin.saveSettings();
         }
 
-        return { filesTouched, idsAdded };
+        return { filesTouched, idsAdded, idsRepositioned };
     }
 
     public async getAllTasks(): Promise<Task[]> {

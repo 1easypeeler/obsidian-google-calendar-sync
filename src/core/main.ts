@@ -147,6 +147,9 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
             // Register event handlers
             this.registerEventHandlers();
 
+            // Register user-invokable commands
+            this.registerCommands();
+
             // Start periodic cleanup
             this.startPeriodicCleanup();
 
@@ -183,21 +186,37 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                         const idPattern = /<!-- task-id: [a-z0-9]+ -->/;
 
                         let idsAdded = 0;
+                        let idsRepositioned = 0;
                         await this.app.vault.process(file, (content) => {
                             const lines = content.split('\n');
                             let modified = false;
+                            // Reset on every retry; vault.process may invoke the
+                            // callback multiple times if the file changes between
+                            // read and write.
+                            idsRepositioned = 0;
 
                             for (let i = 0; i < lines.length; i++) {
                                 const line = lines[i];
                                 // Indented continuation lines — skip
                                 if (/^\s{4,}/.test(line) && !taskPattern.test(line)) continue;
                                 if (!taskPattern.test(line)) continue;
-                                if (idPattern.test(line)) continue;
+
+                                if (idPattern.test(line)) {
+                                    // Legacy trailing comment breaks Tasks-plugin
+                                    // date parsing — reposition without minting
+                                    // a new ID.
+                                    const repositioned = IdUtils.repositionTaskIdComment(line);
+                                    if (repositioned !== line) {
+                                        lines[i] = repositioned;
+                                        modified = true;
+                                        idsRepositioned++;
+                                    }
+                                    continue;
+                                }
                                 if (!datePattern.test(line)) continue;
 
                                 const newId = IdUtils.generateTimeBasedId();
-                                const trimmedRight = line.replace(/\s+$/, '');
-                                lines[i] = `${trimmedRight} <!-- task-id: ${newId} -->`;
+                                lines[i] = IdUtils.insertTaskIdComment(line, `<!-- task-id: ${newId} -->`);
 
                                 const dateMatch = line.match(datePattern);
                                 const now = Date.now();
@@ -225,6 +244,13 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                             // vault.process triggers another modify event;
                             // the debounce will re-enter this handler with
                             // all tasks now carrying IDs — exit here.
+                            return;
+                        }
+
+                        if (idsRepositioned > 0) {
+                            LogUtils.debug(`Repositioned ${idsRepositioned} legacy task-id comment(s) in ${file.path}`);
+                            // The rewrite triggers another modify event; let the
+                            // re-entry handle parse/enqueue once the file is settled.
                             return;
                         }
 
@@ -349,6 +375,41 @@ export default class GoogleCalendarSyncPlugin extends Plugin {
                 }, TIMING.EDITOR_CHANGE_DEBOUNCE_MS)
             )
         );
+    }
+
+    private registerCommands() {
+        // One-shot migration: walks every file in the sync scope and either
+        // tags previously-untagged dated tasks or repositions legacy IDs that
+        // were appended after the Tasks-plugin metadata block (which broke
+        // date parsing). Intended for users who don't run auto-sync.
+        this.addCommand({
+            id: 'migrate-task-id-positions',
+            name: 'Migrate task ID positions',
+            callback: async () => {
+                if (!this.taskParser) {
+                    new Notice('Task parser not initialised yet — try again in a moment.');
+                    return;
+                }
+                try {
+                    const result = await this.taskParser.backfillTaskIds();
+                    const parts: string[] = [];
+                    if (result.idsAdded > 0) {
+                        parts.push(`tagged ${result.idsAdded} new`);
+                    }
+                    if (result.idsRepositioned > 0) {
+                        parts.push(`repositioned ${result.idsRepositioned} legacy`);
+                    }
+                    if (parts.length === 0) {
+                        new Notice('No task IDs needed updating.');
+                    } else {
+                        new Notice(`Migration: ${parts.join(', ')} across ${result.filesTouched} file${result.filesTouched === 1 ? '' : 's'}.`);
+                    }
+                } catch (error) {
+                    LogUtils.error('Task ID migration failed:', error);
+                    new Notice('Task ID migration failed — check the developer console for details.');
+                }
+            },
+        });
     }
 
     private async processEditorChanges(file: TFile) {

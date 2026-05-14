@@ -6,6 +6,14 @@ export class IdUtils {
     private static readonly CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
     private static readonly ID_LENGTH = 16;
 
+    // Obsidian Tasks plugin parses these emoji tokens right-to-left from end
+    // of line and stops at the first unrecognized content. The task-id HTML
+    // comment must therefore sit *before* the leftmost of these on the line,
+    // or Tasks fails to read the due/done/etc dates that trail it.
+    private static readonly TASKS_PLUGIN_TOKEN = /📅|✅|⏳|🛫|🔁|⏫|🔼|🔽|🔺|⏬|🆔|⛔|➕|❌|⏩/u;
+    private static readonly TASK_ID_COMMENT_GLOBAL = /\s*<!-- task-id: [a-z0-9]+ -->\s*/g;
+    private static readonly TASK_ID_COMMENT = /<!-- task-id: [a-z0-9]+ -->/;
+
     /**
      * Generates a cryptographically secure random ID
      * Uses crypto.getRandomValues() for secure random generation
@@ -73,5 +81,39 @@ export class IdUtils {
         }
 
         return (timestamp + randomSuffix).slice(0, this.ID_LENGTH);
+    }
+
+    /**
+     * Insert a task-id HTML comment onto a task line at a position that
+     * doesn't block the Obsidian Tasks plugin's right-to-left token parser.
+     * The comment is placed just before the leftmost Tasks-recognised emoji
+     * token (📅, ✅, etc.) so the metadata block at the end of the line stays
+     * intact. If the line has no such token, the comment is appended at end.
+     *
+     * Caller must ensure `line` does not already contain a task-id comment;
+     * use `repositionTaskIdComment` to relocate an existing one.
+     */
+    static insertTaskIdComment(line: string, idComment: string): string {
+        const stripped = line.replace(/\s+$/, '');
+        const match = stripped.match(this.TASKS_PLUGIN_TOKEN);
+        if (!match || match.index === undefined) {
+            return `${stripped} ${idComment}`;
+        }
+        const before = stripped.slice(0, match.index).replace(/\s+$/, '');
+        const after = stripped.slice(match.index);
+        return `${before} ${idComment} ${after}`;
+    }
+
+    /**
+     * Move any existing task-id comment(s) on the line to the correct position
+     * (before the trailing Tasks-plugin token block). Returns the line
+     * unchanged if it contains no task-id comment.
+     */
+    static repositionTaskIdComment(line: string): string {
+        const match = line.match(this.TASK_ID_COMMENT);
+        if (!match) return line;
+        const idComment = match[0];
+        const cleaned = line.replace(this.TASK_ID_COMMENT_GLOBAL, ' ').replace(/\s+$/, '');
+        return this.insertTaskIdComment(cleaned, idComment);
     }
 }

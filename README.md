@@ -14,12 +14,13 @@ This plugin syncs Obsidian Tasks to Google Calendar as events — one-way, from 
 
 ### How task IDs work
 
-The plugin tracks tasks using HTML comments embedded at the end of each task line (e.g. `<!-- task-id: abc12345 -->`). Key behaviours:
+The plugin tracks tasks using HTML comments embedded on each task line (e.g. `<!-- task-id: abc12345 -->`). Key behaviours:
 
 - **Only dated tasks get an ID.** A task must contain `📅 YYYY-MM-DD` to be tagged. Plain `- [ ]` items are left untouched.
 - **Adding a date tags the task immediately.** The moment you type a date onto a previously-untagged line, an ID is injected.
-- **IDs are always at the end of the line** and are protected from accidental deletion — they can only be removed by deleting the entire task line.
-- **Backfill on sync.** Running a manual sync will tag all pre-existing dated-but-untagged tasks in one pass (on by default, configurable).
+- **IDs sit just before the trailing Tasks-plugin metadata block** (📅, ✅, ⏳, 🔁, priority emojis, etc.) so the Obsidian Tasks plugin can still parse those tokens. On a task with no trailing metadata, the ID is appended at end of line. IDs are protected from accidental deletion — they can only be removed by deleting the entire task line.
+- **Backfill on sync.** Running a manual sync will tag all pre-existing dated-but-untagged tasks in one pass (on by default, configurable). The same pass also relocates any legacy IDs that were sitting at end of line into the new position.
+- **One-shot migration command.** If you don't auto-sync, run **"Migrate task ID positions"** from the command palette to reposition legacy IDs across the vault without minting new ones.
 - **Configurable display.** In Live Preview / Source mode the ID renders as a small `id:abc123…` pill by default. You can show the full comment, truncate it, or hide it entirely — the file on disk is unchanged regardless.
 
 ---
